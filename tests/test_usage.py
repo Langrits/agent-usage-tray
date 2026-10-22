@@ -1,0 +1,177 @@
+"""사용량 조회·알림·기록 테스트. 실제 설정·로그인 파일과 네트워크는 쓰지 않는다.
+
+실행: .venv/Scripts/python.exe -m unittest discover tests
+"""
+import importlib.util
+import json
+import os
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+os.environ["AGENT_USAGE_DATA"] = tempfile.mkdtemp(prefix="agent_usage_test_")   # store 를 불러오기 전에
+
+from agent_usage import i18n, winutil  # noqa: E402
+from agent_usage.models import Usage, Window  # noqa: E402
+from agent_usage.notify import Notifier  # noqa: E402
+from agent_usage.providers import BY_ID, Options, claude, codex, cursor, fetch_one, gemini  # noqa: E402
+from agent_usage.store import History, settings  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class NotifyTest(unittest.TestCase):
+    def test_low_alert_without_reset_time_fires_once(self):
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(msg))
+        u = Usage("test-noreset", "Test", windows=[Window("w", "W", 90, None)])
+        n.check(u)
+        n.check(u)
+        self.assertEqual(len(sent), 1)
+
+
+class HistoryTest(unittest.TestCase):
+    def setUp(self):
+        self.h = History()
+        self.h.con.execute("delete from samples")
+        self.h.con.commit()
+
+    def count(self):
+        return self.h.con.execute("select count(*) from samples").fetchone()[0]
+
+    def test_same_sample_is_stored_once(self):
+        u = Usage("codex", "Codex", windows=[Window("weekly", "W", 10, None)], data_at=1000.0)
+        self.h.add(u)
+        self.h.add(u)
+        self.assertEqual(self.count(), 1)
+
+    def test_older_log_sample_is_not_duplicated_after_newer_one(self):
+        old = Usage("codex", "Codex", windows=[Window("weekly", "W", 10, None)], data_at=1000.0)
+        new = Usage("codex", "Codex", windows=[Window("weekly", "W", 12, None)], data_at=2000.0)
+        for u in (old, new, old, old):
+            self.h.add(u)
+        self.assertEqual(self.count(), 2)
+
+
+class ParseTest(unittest.TestCase):
+    def test_codex_missing_percent_gives_no_window(self):
+        u = Usage("codex", "Codex")
+        codex.parse(u, {"rate_limit": {"primary_window": {"limit_window_seconds": 604800}}})
+        self.assertEqual(u.windows, [])
+
+    def test_cursor_missing_numbers_gives_no_window(self):
+        u = Usage("cursor", "Cursor")
+        cursor.parse(u, {"individualUsage": {"plan": {"enabled": True}}})
+        self.assertEqual(u.windows, [])
+        u = Usage("cursor", "Cursor")
+        cursor.parse(u, {"individualUsage": {"plan": {"enabled": True, "totalPercentUsed": 30.5}}})
+        self.assertEqual([w.used_pct for w in u.windows], [30.5])
+
+    def test_response_without_numbers_becomes_error(self):
+        with mock.patch.object(BY_ID["codex"], "fetch", lambda opts: Usage("codex", "Codex")):
+            u = fetch_one("codex", Options())
+        self.assertFalse(u.ok)
+        self.assertEqual(u.error, i18n.t("err_format"))
+
+
+class GeminiEndpointTest(unittest.TestCase):
+    def base(self, value):
+        env = {"CODE_ASSIST_ENDPOINT": value} if value is not None else {}
+        with mock.patch.dict(os.environ, env, clear=False):
+            if value is None:
+                os.environ.pop("CODE_ASSIST_ENDPOINT", None)
+            return gemini._base_url()
+
+    def test_only_https_googleapis_is_allowed(self):
+        default = gemini.DEFAULT_ENDPOINT + "/v1internal"
+        self.assertEqual(self.base(None), default)
+        self.assertEqual(self.base("http://cloudcode-pa.googleapis.com"), default)
+        self.assertEqual(self.base("https://example.com"), default)
+        self.assertEqual(self.base("https://googleapis.com.evil.io"), default)
+        self.assertEqual(self.base("https://staging-cloudcode-pa.googleapis.com/"),
+                         "https://staging-cloudcode-pa.googleapis.com/v1internal")
+
+
+class FakeResponse:
+    status_code = 200
+
+    def __init__(self, data):
+        self.data = data
+
+    def json(self):
+        return self.data
+
+    def raise_for_status(self):
+        pass
+
+
+class ClaudeRenewalTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, ".credentials.json")
+        self.write("old-access", "old-refresh", time.time() - 10)
+        self.patches = [mock.patch.object(claude, "CRED_PATH", self.path),
+                        mock.patch.object(claude, "CLAUDE_DIR", self.dir)]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+
+    def write(self, access, refresh, expires):
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump({"claudeAiOauth": {"accessToken": access, "refreshToken": refresh,
+                                         "expiresAt": int(expires * 1000), "subscriptionType": "max"}}, f)
+
+    def read(self):
+        with open(self.path, encoding="utf-8") as f:
+            return json.load(f)["claudeAiOauth"]
+
+    def test_renews_and_writes_back(self):
+        new = {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 28800}
+        with mock.patch.object(claude.requests, "post", lambda *a, **k: FakeResponse(new)):
+            token, _ = claude._access_token(Options(auto_refresh_login=True))
+        self.assertEqual(token, "new-access")
+        self.assertEqual(self.read()["refreshToken"], "new-refresh")
+
+    def test_keeps_cli_login_written_during_renewal(self):
+        def cli_refreshed_meanwhile(*a, **k):
+            self.write("cli-access", "cli-refresh", time.time() + 3600)
+            return FakeResponse({"access_token": "app-access", "refresh_token": "app-refresh", "expires_in": 28800})
+        with mock.patch.object(claude.requests, "post", cli_refreshed_meanwhile):
+            token, _ = claude._access_token(Options(auto_refresh_login=True))
+        self.assertEqual(token, "cli-access")
+        self.assertEqual(self.read()["refreshToken"], "cli-refresh")   # CLI 것을 덮어쓰지 않음
+
+
+class ProbeRedactTest(unittest.TestCase):
+    def test_ids_names_emails_and_tokens_are_hidden(self):
+        spec = importlib.util.spec_from_file_location("probe", os.path.join(ROOT, "tools", "probe.py"))
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        out = probe.redact({"user_id": "user-80abc", "accountId": "6ff7e51b", "email": "a@b.co", "plan_type": "pro",
+                            "note": "mail a@b.co key TESTTOKEN0123456789abcdefghijk"})
+        self.assertEqual(out["user_id"], "<redacted>")
+        self.assertEqual(out["accountId"], "<redacted>")
+        self.assertEqual(out["email"], "<redacted>")
+        self.assertEqual(out["plan_type"], "pro")
+        self.assertNotIn("a@b.co", out["note"])
+        self.assertNotIn("TESTTOKEN0123456789abcdefghijk", out["note"])
+
+
+class WindowsTest(unittest.TestCase):
+    def test_work_area_at_returns_a_rectangle(self):
+        left, top, right, bottom = winutil.work_area_at(10, 10)
+        self.assertLess(left, right)
+        self.assertLess(top, bottom)
+
+
+class StringsTest(unittest.TestCase):
+    def test_korean_and_english_have_same_keys(self):
+        self.assertEqual(set(i18n.KO), set(i18n.EN))
+
+
+if __name__ == "__main__":
+    unittest.main()

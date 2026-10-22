@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -29,8 +30,23 @@ TITLE = "Gemini"
 EXPERIMENTAL = True
 
 CREDS_PATH = os.path.join(HOME, ".gemini", "oauth_creds.json")
-BASE_URL = (os.environ.get("CODE_ASSIST_ENDPOINT") or "https://cloudcode-pa.googleapis.com") + "/v1internal"
+DEFAULT_ENDPOINT = "https://cloudcode-pa.googleapis.com"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+def _base_url() -> str:
+    """Gemini CLI처럼 CODE_ASSIST_ENDPOINT를 따르되, Google 토큰이 Google 밖으로 가지 않게 https·googleapis.com만 허용."""
+    custom = os.environ.get("CODE_ASSIST_ENDPOINT")
+    if custom:
+        u = urlparse(custom)
+        host = (u.hostname or "").lower()
+        if u.scheme == "https" and (host == "googleapis.com" or host.endswith(".googleapis.com")):
+            return custom.rstrip("/") + "/v1internal"
+        log.warning("gemini: ignoring CODE_ASSIST_ENDPOINT outside googleapis.com")
+    return DEFAULT_ENDPOINT + "/v1internal"
+
+
+BASE_URL = _base_url()
 MAX_WINDOWS = 4
 
 _CLIENT_ID_RE = re.compile(r"\d{6,}-[a-z0-9]+\.apps\.googleusercontent\.com")
@@ -97,9 +113,10 @@ def _access_token(opts: Options) -> str:
     if not client:
         raise LoginProblem(t("err_expired", title="Gemini"), t("hint_gemini_run"))
 
+    used_refresh = creds["refresh_token"]
     resp = requests.post(TOKEN_URL, timeout=15, data={
         "grant_type": "refresh_token",
-        "refresh_token": creds["refresh_token"],
+        "refresh_token": used_refresh,
         "client_id": client[0],
         "client_secret": client[1],
     })
@@ -108,7 +125,13 @@ def _access_token(opts: Options) -> str:
     resp.raise_for_status()
     tok = resp.json()
 
+    # 그 사이 Gemini CLI가 먼저 갱신했거나 다른 계정으로 다시 로그인했으면 파일을 덮어쓰지 않는다
     creds = read_json(CREDS_PATH)
+    if creds.get("refresh_token") != used_refresh:
+        log.info("gemini: login file changed during renewal; keeping the CLI's login")
+        if creds.get("access_token") and (creds.get("expiry_date") or 0) / 1000 > time.time() + 60:
+            return creds["access_token"]
+        return tok["access_token"]
     creds["access_token"] = tok["access_token"]
     creds["expiry_date"] = int((time.time() + int(tok.get("expires_in") or 3600)) * 1000)
     for k in ("id_token", "scope", "token_type", "refresh_token"):

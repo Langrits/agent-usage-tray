@@ -23,9 +23,13 @@ BY_ID = {m.ID: m for m in ALL}
 def fetch_one(pid: str, opts: Options) -> Usage:
     mod = BY_ID[pid]
     try:
-        return mod.fetch(opts)
+        usage = mod.fetch(opts)
     except Exception as e:  # 네트워크 오류 등 → 화면에 그대로 보여준다
         return Usage(pid, mod.TITLE).fail(t("err_fetch", err=f"{type(e).__name__}: {e}")[:200], t("hint_fetch"))
+    if usage.ok and not usage.windows:
+        # 응답은 왔는데 숫자가 없다 = 형식이 바뀌었을 가능성. 잘못된 '100% 남음'을 보이지 않고 오류로 둔다
+        return usage.fail(t("err_format"), t("hint_fetch"))
+    return usage
 
 
 def fetch_all(ids: list[str], opts: Options) -> dict[str, Usage]:

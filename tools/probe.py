@@ -1,6 +1,8 @@
 """개발용: 각 서비스 사용량 주소의 응답 구조를 확인한다.
 
-토큰 값은 출력하지 않고, 이메일처럼 보이는 문자열은 가린다.
+이슈에 붙여도 되도록 가린다: ID·이름·이메일·토큰·결제 정보 같은 항목은 값을 지우고,
+긴 문자열은 길이만, 그 밖의 문자열 속 이메일·토큰처럼 보이는 부분도 지운다.
+그래도 붙이기 전에 한 번 읽어 보세요.
 사용법: python tools/probe.py cursor|codex|claude
 """
 import base64
@@ -13,18 +15,21 @@ import sys
 import requests
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+TOKENISH = re.compile(r"[A-Za-z0-9_\-.]{24,}")          # 토큰·키·긴 ID처럼 보이는 덩어리
+SECRET_KEY = re.compile(r"(^|_)(id|ids|email|name|user|account|token|secret|key|payment|customer|org|uuid|sub)($|_)", re.I)
 
 
-def redact(o):
+def redact(o, key: str = ""):
     if isinstance(o, dict):
-        return {k: redact(v) for k, v in o.items()}
+        return {k: redact(v, k) for k, v in o.items()}
     if isinstance(o, list):
-        return [redact(v) for v in o]
+        return [redact(v, key) for v in o]
     if isinstance(o, str):
-        if EMAIL.search(o):
-            return "<email>"
-        if len(o) > 80:
+        if SECRET_KEY.search(re.sub(r"([a-z])([A-Z])", r"\1_\2", key)):
+            return "<redacted>"
+        if len(o) > 60:
             return f"<str {len(o)}>"
+        return TOKENISH.sub("<redacted>", EMAIL.sub("<email>", o))
     return o
 
 
@@ -32,8 +37,8 @@ def show(name, resp):
     print(f"== {name}: HTTP {resp.status_code}")
     try:
         print(json.dumps(redact(resp.json()), ensure_ascii=False, indent=1)[:4000])
-    except ValueError:
-        print(resp.text[:300])
+    except ValueError:      # JSON이 아닌 응답(오류 페이지 등)도 가린 뒤 앞부분만
+        print(TOKENISH.sub("<redacted>", EMAIL.sub("<email>", resp.text[:300])))
 
 
 def jwt_claims(tok):

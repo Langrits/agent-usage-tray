@@ -26,6 +26,28 @@ def work_area() -> tuple[int, int, int, int]:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def work_area_at(x: int, y: int) -> tuple[int, int, int, int]:
+    """(x, y)가 있는 모니터(없으면 가장 가까운 모니터)의 작업 영역. 보조 모니터에 고정한 팝업용."""
+    try:
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = wintypes.HMONITOR
+        user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        monitor = user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)   # MONITOR_DEFAULTTONEAREST
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(_MonitorInfo)
+        if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            r = info.rcWork
+            return r.left, r.top, r.right, r.bottom
+    except (AttributeError, OSError):
+        pass
+    return work_area()
+
+
 def round_corners(tk_window) -> None:
     """Windows 11에서 테두리 없는 창도 둥근 모서리로."""
     try:

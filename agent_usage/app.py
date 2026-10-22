@@ -59,6 +59,8 @@ class App:
         self.visible: list[str] = self.compute_visible()
         self.updated_at: float | None = None
         self.fetching = False
+        self._refresh_again = False
+        self._quitting = False
         self._next_job = None
         self._last_tick = time.time()
         self._tray_state = None
@@ -133,12 +135,20 @@ class App:
         self.q.put(msg)
 
     def _poll(self) -> None:
+        """메시지 하나가 실패해도 다음 메시지와 다음 폴링은 계속된다."""
         try:
             while True:
-                self._handle(*self.q.get_nowait())
-        except queue.Empty:
-            pass
-        self.root.after(100, self._poll)
+                try:
+                    msg = self.q.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    self._handle(*msg)
+                except Exception:
+                    log.exception("handling %r failed", msg[0] if msg else None)
+        finally:
+            if not self._quitting:
+                self.root.after(100, self._poll)
 
     def _handle(self, kind: str, arg=None) -> None:
         if kind == "toggle":
@@ -154,12 +164,14 @@ class App:
         elif kind == "settings":
             self.open_settings()
         elif kind == "quit":
+            self._quitting = True
             self.icon.stop()
             self.root.destroy()
 
     # ── 조회 ─────────────────────────────────────────────
     def refresh(self) -> None:
         if self.fetching:
+            self._refresh_again = True     # 조회 중 바뀐 설정은 끝나는 대로 다시 조회해 반영
             return
         if self._next_job:
             self.root.after_cancel(self._next_job)
@@ -178,22 +190,31 @@ class App:
     def _on_results(self, results: dict[str, Usage]) -> None:
         self.fetching = False
         self.updated_at = time.time()
-        for pid, u in results.items():
-            self.latest[pid] = u
-            if u.ok:
+        try:
+            for pid, u in results.items():
+                self.latest[pid] = u
+                if not u.ok:
+                    log.info("%s: %s", pid, u.error)
+                    continue
                 self.good[pid] = u
-                self.history.add(u)
-                self.notifier.check(u)
+                for step in (self.history.add, self.notifier.check):   # 기록·알림 저장 실패가 화면 갱신을 막지 않게
+                    try:
+                        step(u)
+                    except Exception:
+                        log.exception("%s failed for %s", step.__name__, pid)
+            self._flush_notes()
+            self._update_tray()
+            self.popup.render_if_visible()
+            if self.graph and self.graph.alive():
+                self.graph.redraw()
+            if self.settings_win and self.settings_win.alive():
+                self.settings_win.refresh_status()
+        finally:
+            if self._refresh_again:
+                self._refresh_again = False
+                self.schedule_refresh(1)
             else:
-                log.info("%s: %s", pid, u.error)
-        self._flush_notes()
-        self._update_tray()
-        self.popup.render_if_visible()
-        if self.graph and self.graph.alive():
-            self.graph.redraw()
-        if self.settings_win and self.settings_win.alive():
-            self.settings_win.refresh_status()
-        self.schedule_refresh(self.settings["refresh_minutes"] * 60)
+                self.schedule_refresh(self.settings["refresh_minutes"] * 60)
 
     def _tick(self) -> None:
         """초기화 시각이 지나면 30초 뒤 다시 조회하고, 남은 시간 표시를 갱신한다."""
@@ -293,8 +314,17 @@ class Popup:
         self.win.configure(bg=pal["border"])
         self.win.bind("<Escape>", lambda e: self.hide())
         self.win.bind("<FocusOut>", lambda e: self.win.after(150, self._check_focus))
-        self.frame = tk.Frame(self.win, bg=pal["bg"])
-        self.frame.pack(fill="both", expand=True, padx=1, pady=1)
+        outer = tk.Frame(self.win, bg=pal["bg"])
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
+        # 화면보다 길어지면 스크롤된다 (카드가 많거나 화면 배율이 클 때)
+        self.canvas = tk.Canvas(outer, bg=pal["bg"], highlightthickness=0, bd=0)
+        self.scrollbar = tk.Scrollbar(outer, orient="vertical", command=self.canvas.yview, width=self.px(10))
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.frame = tk.Frame(self.canvas, bg=pal["bg"])
+        self._frame_id = self.canvas.create_window(0, 0, window=self.frame, anchor="nw")
+        self._scrolling = False
+        self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
 
     def show(self) -> None:
         if not self.win:
@@ -338,10 +368,23 @@ class Popup:
 
     def _place(self) -> None:
         self.win.update_idletasks()
-        w, h = self.px(self.WIDTH), self.win.winfo_reqheight()
-        left, top, right, bottom = winutil.work_area()
-        pos = self.app.settings["pin_pos"]
-        if self.pinned and pos:
+        w = self.px(self.WIDTH)
+        pos = self.app.settings["pin_pos"] if self.pinned else None
+        left, top, right, bottom = winutil.work_area_at(pos[0] + w // 2, pos[1]) if pos else winutil.work_area()
+        content = self.frame.winfo_reqheight()
+        h = min(content, bottom - top - self.px(24)) + 2          # +2: 테두리
+        scrolling = content + 2 > h
+        if scrolling != self._scrolling:
+            self._scrolling = scrolling
+            if scrolling:
+                self.scrollbar.pack(side="right", fill="y")
+            else:
+                self.scrollbar.pack_forget()
+                self.canvas.yview_moveto(0)
+        inner_w = w - 2 - (self.scrollbar.winfo_reqwidth() if scrolling else 0)
+        self.canvas.itemconfigure(self._frame_id, width=inner_w)
+        self.canvas.configure(width=inner_w, height=h - 2, scrollregion=(0, 0, inner_w, content))
+        if pos:
             x = min(max(pos[0], left), right - w)
             y = min(max(pos[1], top), bottom - h)
         else:
@@ -349,6 +392,10 @@ class Popup:
         if (w, h, x, y) != self._geom:       # 크기·위치가 바뀔 때만 옮긴다
             self._geom = (w, h, x, y)
             self.win.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_wheel(self, e) -> None:
+        if self._scrolling and self.visible and str(e.widget).startswith(str(self.win)):
+            self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     # 고정 상태에서는 머리글을 끌어 옮길 수 있다
     def _drag_start(self, e) -> None:

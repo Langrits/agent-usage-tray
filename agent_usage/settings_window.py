@@ -60,19 +60,33 @@ class SettingsWindow:
     def _spin(self, parent, value: int, lo: int, hi: int, on_change) -> tk.Spinbox:
         pal = self.pal
         var = tk.StringVar(value=str(value))
+        last_valid = [value]
 
-        def changed(*_):
+        def parsed() -> int | None:
             try:
                 v = int(var.get())
             except ValueError:
-                return
-            if lo <= v <= hi:
+                return None
+            return v if lo <= v <= hi else None
+
+        def changed(*_):
+            v = parsed()
+            if v is not None:
+                last_valid[0] = v
                 on_change(v)
+
+        def settle(_e=None):
+            # 입력을 마쳤는데 범위 밖이거나 숫자가 아니면 실제 적용된 값으로 되돌린다
+            if parsed() is None:
+                var.set(str(last_valid[0]))
+
         var.trace_add("write", changed)
         sp = tk.Spinbox(parent, from_=lo, to=hi, textvariable=var, width=4, font=(theme.FONT, 9),
                         fg=pal["text"], bg=pal["bg"], buttonbackground=pal["card"], insertbackground=pal["text"],
                         relief="flat", highlightthickness=1, highlightbackground=pal["border"],
                         highlightcolor=pal["border"])
+        sp.bind("<FocusOut>", settle)
+        sp.bind("<Return>", settle)
         sp.var = var
         return sp
 

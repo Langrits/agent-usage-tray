@@ -49,8 +49,9 @@ tools/snapshot.py           render popup / chart / settings to PNG (use --fake f
 
 ## Rules for handling credentials
 
-- Never print, log or store tokens. `tools/probe.py` redacts long strings and emails; keep it that way.
+- Never print, log or store tokens. `tools/probe.py` blanks fields whose names look like IDs, names, emails, tokens or payment info, shortens long strings and masks email/token-like text, but it is not perfect: read its output before pasting it into an issue.
 - Send a token only to the service that issued it.
-- Prefer read-only access. If you must write back a renewed token, re-read the file first, then write atomically (`write_json_atomic`), and respect `opts.auto_refresh_login`.
+- Prefer read-only access. If you must write back a renewed token, re-read the file first and skip the write if the CLI changed it in the meantime (compare the refresh token you used), then write atomically (`write_json_atomic`), and respect `opts.auto_refresh_login`.
+- If a response has no usage numbers, return no windows (don't assume 0% used); `fetch_one()` turns that into a "format changed" error.
 - Don't commit client secrets, even "public" ones. Look them up from the user's installed tool at runtime (see `gemini.py`).
 - Handle `401` (expired login) and `429` (rate limited) with a clear message and hint.

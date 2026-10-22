@@ -6,6 +6,7 @@ Cursor 앱이 저장한 로그인(%APPDATA%/Cursor/User/globalStorage/state.vscd
 from __future__ import annotations
 
 import os
+import pathlib
 import sqlite3
 
 import requests
@@ -26,11 +27,18 @@ PLAN_NAMES = {"free": "Free", "pro": "Pro", "pro_plus": "Pro+", "ultra": "Ultra"
 
 
 def detect() -> bool:
-    return os.path.exists(STATE_DB)
+    """Cursor가 설치돼 있을 뿐 아니라 로그인 정보까지 있어야 '로그인 정보 있음'."""
+    if not os.path.exists(STATE_DB):
+        return False
+    try:
+        return bool(_read_state("cursorAuth/accessToken"))
+    except sqlite3.Error:
+        return False
 
 
 def _read_state(key: str) -> str | None:
-    con = sqlite3.connect(f"file:{STATE_DB}?mode=ro", uri=True)
+    # 경로에 #·? 같은 문자가 있어도 깨지지 않게 인코딩된 파일 URI로 연다
+    con = sqlite3.connect(pathlib.Path(STATE_DB).as_uri() + "?mode=ro", uri=True)
     try:
         row = con.execute("select value from ItemTable where key=?", (key,)).fetchone()
         return row[0] if row else None
@@ -71,9 +79,10 @@ def parse(usage: Usage, d: dict) -> None:
         if plan.get("apiPercentUsed") is not None:
             notes.append(f"API {plan['apiPercentUsed']:.0f}%")
         total = plan.get("totalPercentUsed")
-        if total is None and plan.get("limit"):
-            total = 100 * (plan.get("used") or 0) / plan["limit"]
-        usage.windows.append(Window("month", t("w_month"), float(total or 0), resets_at, " · ".join(notes)))
+        if total is None and plan.get("limit") and isinstance(plan.get("used"), (int, float)):
+            total = 100 * plan["used"] / plan["limit"]
+        if isinstance(total, (int, float)):        # 값이 없으면 0% 사용으로 가정하지 않는다
+            usage.windows.append(Window("month", t("w_month"), float(total), resets_at, " · ".join(notes)))
 
     on_demand = individual.get("onDemand") or {}
     if on_demand.get("enabled"):

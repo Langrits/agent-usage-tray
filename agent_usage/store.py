@@ -62,6 +62,10 @@ class History:
         self.con.execute("""create table if not exists samples (
             ts real, provider text, window text, label text, used real, resets_at real)""")
         self.con.execute("create index if not exists samples_ts on samples(ts)")
+        # 같은 시각의 같은 한도는 한 번만 (작업 기록처럼 기준 시각이 그대로인 데이터가 반복 저장되지 않게)
+        self.con.execute("""delete from samples where rowid not in (
+            select min(rowid) from samples group by provider, window, ts)""")
+        self.con.execute("create unique index if not exists samples_unique on samples(provider, window, ts)")
         self.con.commit()
 
     def add(self, usage: Usage) -> None:
@@ -70,11 +74,7 @@ class History:
         rows = [(usage.data_at, usage.provider, w.key, w.label, w.used_pct, w.resets_at)
                 for w in usage.windows if w.used_pct is not None]
         with self.lock:
-            # 작업 기록처럼 기준 시각이 그대로인 데이터는 한 번만 저장
-            last = self.con.execute("select max(ts) from samples where provider=?", (usage.provider,)).fetchone()[0]
-            if last is not None and abs(last - usage.data_at) < 1:
-                return
-            self.con.executemany("insert into samples values (?,?,?,?,?,?)", rows)
+            self.con.executemany("insert or ignore into samples values (?,?,?,?,?,?)", rows)
             self.con.commit()
 
     def series(self, since_hours: float) -> dict[tuple[str, str], list[tuple[float, float, str]]]:

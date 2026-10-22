@@ -51,9 +51,10 @@ def _access_token(opts: Options) -> tuple[str, dict]:
     if not oauth.get("refreshToken"):
         raise LoginProblem(t("err_expired", title="Claude"), t("hint_claude_login"))
 
+    used_refresh = oauth["refreshToken"]
     resp = requests.post(TOKEN_URL, timeout=15, json={
         "grant_type": "refresh_token",
-        "refresh_token": oauth["refreshToken"],
+        "refresh_token": used_refresh,
         "client_id": CLIENT_ID,
     })
     if resp.status_code in (400, 401, 403):
@@ -61,9 +62,14 @@ def _access_token(opts: Options) -> tuple[str, dict]:
     resp.raise_for_status()
     tok = resp.json()
 
-    # 갱신 직전에 CLI가 먼저 갱신했을 수 있으니 파일을 다시 읽어 그 위에 덮어쓴다
+    # 그 사이 CLI가 먼저 갱신했거나 다른 계정으로 다시 로그인했으면 파일을 덮어쓰지 않는다
     creds = read_json(CRED_PATH)
     oauth = creds.setdefault("claudeAiOauth", {})
+    if oauth.get("refreshToken") != used_refresh:
+        log.info("claude: login file changed during renewal; keeping the CLI's login")
+        if oauth.get("accessToken") and (oauth.get("expiresAt") or 0) / 1000 > time.time() + 60:
+            return oauth["accessToken"], oauth
+        return tok["access_token"], oauth
     oauth["accessToken"] = tok["access_token"]
     if tok.get("refresh_token"):
         oauth["refreshToken"] = tok["refresh_token"]

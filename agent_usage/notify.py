@@ -36,12 +36,14 @@ class Notifier:
                     self.send(t("n_reset_title"), t("n_reset", name=name, r=f"{remaining:.0f}"))
 
             low_cycle = (prev or {}).get("low_cycle")
+            # 이번 한도 주기의 표식. 초기화 시각이 없는 한도도 한 번은 알리도록 별도 값을 쓴다
+            cycle = w.resets_at if w.resets_at is not None else "no-reset-time"
             if self.settings["notify_low"] and remaining <= threshold:
-                if low_cycle != w.resets_at:
+                if low_cycle != cycle:
                     when = countdown(w.resets_at)
                     self.send(t("n_low_title"), t("n_low", name=name, r=f"{remaining:.0f}")
                               + (t("n_low_when", when=when) if when else ""))
-                    low_cycle = w.resets_at
+                    low_cycle = cycle
             elif remaining > threshold:
                 low_cycle = None
 
