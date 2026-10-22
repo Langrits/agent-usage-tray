@@ -394,7 +394,13 @@ class Popup:
             self.win.geometry(f"{w}x{h}+{x}+{y}")
 
     def _on_wheel(self, e) -> None:
-        if self._scrolling and self.visible and str(e.widget).startswith(str(self.win)):
+        if not (self._scrolling and self.visible):
+            return
+        try:
+            inside = e.widget.winfo_toplevel() == self.win     # 설정·그래프 창의 휠은 무시
+        except (AttributeError, tk.TclError):
+            inside = False
+        if inside:
             self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     # 고정 상태에서는 머리글을 끌어 옮길 수 있다

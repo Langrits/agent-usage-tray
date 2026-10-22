@@ -14,7 +14,7 @@ import requests
 
 from ..i18n import t
 from ..models import ResetCredits, Usage, Window, window_key, window_label
-from ._util import HOME, Options, epoch, read_json
+from ._util import HOME, Options, as_number, epoch, read_json
 
 ID = "codex"
 TITLE = "Codex"
@@ -65,10 +65,10 @@ def parse(usage: Usage, d: dict) -> None:
     usage.plan = _plan(d.get("plan_type"))
     rl = d.get("rate_limit") or {}
     for w in (rl.get("primary_window"), rl.get("secondary_window")):
-        if w and isinstance(w.get("used_percent"), (int, float)):   # 값이 빠졌으면 0%로 가정하지 않는다
+        used = as_number((w or {}).get("used_percent"))
+        if used is not None:                       # 값이 빠졌으면 0%로 가정하지 않는다
             secs = w.get("limit_window_seconds")
-            usage.windows.append(Window(window_key(secs), window_label(secs),
-                                        float(w["used_percent"]), w.get("reset_at")))
+            usage.windows.append(Window(window_key(secs), window_label(secs), used, w.get("reset_at")))
     for extra in d.get("additional_rate_limits") or []:
         _add_extra_limit(usage, extra)
 
@@ -89,10 +89,11 @@ def _add_extra_limit(usage: Usage, extra: dict) -> None:
     name = extra.get("limit_name") or extra.get("name") or extra.get("model")
     rl = extra.get("rate_limit") or extra
     for w in (rl.get("primary_window"), rl.get("secondary_window")):
-        if w and w.get("used_percent") is not None:
+        used = as_number((w or {}).get("used_percent"))
+        if used is not None:
             secs = w.get("limit_window_seconds")
             usage.windows.append(Window(f"{name}:{window_key(secs)}", f"{window_label(secs)} ({name})",
-                                        float(w["used_percent"]), w.get("reset_at")))
+                                        used, w.get("reset_at")))
 
 
 def _earliest_expiry(rc: dict) -> float | None:
@@ -126,10 +127,10 @@ def _from_logs() -> Usage:
         usage.plan = _plan(rl.get("plan_type"))
         usage.data_at = ts
         for w in (rl.get("primary"), rl.get("secondary")):
-            if w and isinstance(w.get("used_percent"), (int, float)):
+            used = as_number((w or {}).get("used_percent"))
+            if used is not None:
                 secs = (w.get("window_minutes") or 0) * 60
-                usage.windows.append(Window(window_key(secs), window_label(secs),
-                                            float(w["used_percent"]), w.get("resets_at")))
+                usage.windows.append(Window(window_key(secs), window_label(secs), used, w.get("resets_at")))
         return usage
     return usage.fail(t("err_no_data", title="Codex"), t("hint_codex_login"))
 

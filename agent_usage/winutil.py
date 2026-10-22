@@ -37,13 +37,15 @@ def work_area_at(x: int, y: int) -> tuple[int, int, int, int]:
         user32 = ctypes.windll.user32
         user32.MonitorFromPoint.restype = wintypes.HMONITOR
         user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
+        user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MonitorInfo)]   # 64비트 핸들 그대로
         monitor = user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)   # MONITOR_DEFAULTTONEAREST
         info = _MonitorInfo()
         info.cbSize = ctypes.sizeof(_MonitorInfo)
         if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
             r = info.rcWork
             return r.left, r.top, r.right, r.bottom
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, ctypes.ArgumentError):
         pass
     return work_area()
 

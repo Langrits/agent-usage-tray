@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import tempfile
 from dataclasses import dataclass
@@ -10,6 +11,13 @@ from datetime import datetime
 
 HOME = os.path.expanduser("~")
 USER_AGENT = "ai-usage-tray"
+
+
+def as_number(v) -> float | None:
+    """응답의 사용 비율 값. 없거나 true/false·무한대 같은 이상한 값이면 None (0%로 가정하지 않는다)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return float(v) if math.isfinite(v) else None
 
 
 @dataclass

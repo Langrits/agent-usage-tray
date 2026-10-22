@@ -26,8 +26,9 @@ def fetch_one(pid: str, opts: Options) -> Usage:
         usage = mod.fetch(opts)
     except Exception as e:  # 네트워크 오류 등 → 화면에 그대로 보여준다
         return Usage(pid, mod.TITLE).fail(t("err_fetch", err=f"{type(e).__name__}: {e}")[:200], t("hint_fetch"))
-    if usage.ok and not usage.windows:
-        # 응답은 왔는데 숫자가 없다 = 형식이 바뀌었을 가능성. 잘못된 '100% 남음'을 보이지 않고 오류로 둔다
+    if usage.ok and not usage.windows and not usage.extra:
+        # 응답은 왔는데 보여줄 게 하나도 없다 = 형식이 바뀌었을 가능성. 잘못된 '100% 남음' 대신 오류로 둔다
+        # (Cursor처럼 한도 없이 추가 사용 금액만 있는 경우는 extra에 담겨 정상으로 본다)
         return usage.fail(t("err_format"), t("hint_fetch"))
     return usage
 

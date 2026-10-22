@@ -24,9 +24,9 @@ def redact(o, key: str = ""):
         return {k: redact(v, k) for k, v in o.items()}
     if isinstance(o, list):
         return [redact(v, key) for v in o]
+    if o is not None and not isinstance(o, bool) and SECRET_KEY.search(re.sub(r"([a-z])([A-Z])", r"\1_\2", key)):
+        return "<redacted>"                       # 문자열이든 숫자든 ID·이름·토큰류 항목은 값을 지운다
     if isinstance(o, str):
-        if SECRET_KEY.search(re.sub(r"([a-z])([A-Z])", r"\1_\2", key)):
-            return "<redacted>"
         if len(o) > 60:
             return f"<str {len(o)}>"
         return TOKENISH.sub("<redacted>", EMAIL.sub("<email>", o))

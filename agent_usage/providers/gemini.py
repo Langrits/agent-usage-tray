@@ -38,11 +38,14 @@ def _base_url() -> str:
     """Gemini CLI처럼 CODE_ASSIST_ENDPOINT를 따르되, Google 토큰이 Google 밖으로 가지 않게 https·googleapis.com만 허용."""
     custom = os.environ.get("CODE_ASSIST_ENDPOINT")
     if custom:
-        u = urlparse(custom)
-        host = (u.hostname or "").lower()
-        if u.scheme == "https" and (host == "googleapis.com" or host.endswith(".googleapis.com")):
+        try:
+            u = urlparse(custom)
+            host = (u.hostname or "").lower()
+        except ValueError:          # 형식이 깨진 주소 하나로 앱이 시작을 못 하면 안 된다
+            u, host = None, ""
+        if u and u.scheme == "https" and (host == "googleapis.com" or host.endswith(".googleapis.com")):
             return custom.rstrip("/") + "/v1internal"
-        log.warning("gemini: ignoring CODE_ASSIST_ENDPOINT outside googleapis.com")
+        log.warning("gemini: ignoring CODE_ASSIST_ENDPOINT (only https *.googleapis.com is allowed)")
     return DEFAULT_ENDPOINT + "/v1internal"
 
 

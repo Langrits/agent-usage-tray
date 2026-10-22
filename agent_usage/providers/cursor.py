@@ -13,7 +13,7 @@ import requests
 
 from ..i18n import t
 from ..models import Usage, Window
-from ._util import Options, epoch, jwt_claims
+from ._util import Options, as_number, epoch, jwt_claims
 
 ID = "cursor"
 TITLE = "Cursor"
@@ -27,18 +27,21 @@ PLAN_NAMES = {"free": "Free", "pro": "Pro", "pro_plus": "Pro+", "ultra": "Ultra"
 
 
 def detect() -> bool:
-    """Cursor가 설치돼 있을 뿐 아니라 로그인 정보까지 있어야 '로그인 정보 있음'."""
+    """Cursor가 설치돼 있을 뿐 아니라 로그인 정보까지 있어야 '로그인 정보 있음'.
+
+    화면 스레드에서 불리므로 Cursor가 DB를 잠그고 있으면 기다리지 않고 파일이 있는지만 본다.
+    """
     if not os.path.exists(STATE_DB):
         return False
     try:
-        return bool(_read_state("cursorAuth/accessToken"))
+        return bool(_read_state("cursorAuth/accessToken", timeout=0.2))
     except sqlite3.Error:
-        return False
+        return True
 
 
-def _read_state(key: str) -> str | None:
+def _read_state(key: str, timeout: float = 5.0) -> str | None:
     # 경로에 #·? 같은 문자가 있어도 깨지지 않게 인코딩된 파일 URI로 연다
-    con = sqlite3.connect(pathlib.Path(STATE_DB).as_uri() + "?mode=ro", uri=True)
+    con = sqlite3.connect(pathlib.Path(STATE_DB).as_uri() + "?mode=ro", uri=True, timeout=timeout)
     try:
         row = con.execute("select value from ItemTable where key=?", (key,)).fetchone()
         return row[0] if row else None
@@ -78,11 +81,12 @@ def parse(usage: Usage, d: dict) -> None:
             notes.append(f"Auto {plan['autoPercentUsed']:.0f}%")
         if plan.get("apiPercentUsed") is not None:
             notes.append(f"API {plan['apiPercentUsed']:.0f}%")
-        total = plan.get("totalPercentUsed")
-        if total is None and plan.get("limit") and isinstance(plan.get("used"), (int, float)):
-            total = 100 * plan["used"] / plan["limit"]
-        if isinstance(total, (int, float)):        # 값이 없으면 0% 사용으로 가정하지 않는다
-            usage.windows.append(Window("month", t("w_month"), float(total), resets_at, " · ".join(notes)))
+        total = as_number(plan.get("totalPercentUsed"))
+        used, limit = as_number(plan.get("used")), as_number(plan.get("limit"))
+        if total is None and used is not None and limit:
+            total = 100 * used / limit
+        if total is not None:                      # 값이 없으면 0% 사용으로 가정하지 않는다
+            usage.windows.append(Window("month", t("w_month"), total, resets_at, " · ".join(notes)))
 
     on_demand = individual.get("onDemand") or {}
     if on_demand.get("enabled"):

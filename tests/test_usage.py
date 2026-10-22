@@ -68,11 +68,30 @@ class ParseTest(unittest.TestCase):
         cursor.parse(u, {"individualUsage": {"plan": {"enabled": True, "totalPercentUsed": 30.5}}})
         self.assertEqual([w.used_pct for w in u.windows], [30.5])
 
+    def test_odd_numbers_are_not_used_as_percent(self):
+        u = Usage("codex", "Codex")
+        codex.parse(u, {"rate_limit": {"primary_window": {"used_percent": True, "limit_window_seconds": 604800}}})
+        self.assertEqual(u.windows, [])
+        u = Usage("cursor", "Cursor")
+        cursor.parse(u, {"individualUsage": {"plan": {"enabled": True, "totalPercentUsed": float("inf")}}})
+        self.assertEqual(u.windows, [])
+
     def test_response_without_numbers_becomes_error(self):
         with mock.patch.object(BY_ID["codex"], "fetch", lambda opts: Usage("codex", "Codex")):
             u = fetch_one("codex", Options())
         self.assertFalse(u.ok)
         self.assertEqual(u.error, i18n.t("err_format"))
+
+    def test_cursor_on_demand_only_is_not_an_error(self):
+        def on_demand_only(opts):
+            u = Usage("cursor", "Cursor")
+            cursor.parse(u, {"individualUsage": {"plan": {"enabled": False},
+                                                 "onDemand": {"enabled": True, "used": 1234, "limit": 5000}}})
+            return u
+        with mock.patch.object(BY_ID["cursor"], "fetch", on_demand_only):
+            u = fetch_one("cursor", Options())
+        self.assertTrue(u.ok)
+        self.assertEqual(len(u.extra), 1)
 
 
 class GeminiEndpointTest(unittest.TestCase):
@@ -91,6 +110,9 @@ class GeminiEndpointTest(unittest.TestCase):
         self.assertEqual(self.base("https://googleapis.com.evil.io"), default)
         self.assertEqual(self.base("https://staging-cloudcode-pa.googleapis.com/"),
                          "https://staging-cloudcode-pa.googleapis.com/v1internal")
+
+    def test_malformed_endpoint_does_not_crash(self):
+        self.assertEqual(self.base("https://[invalid"), gemini.DEFAULT_ENDPOINT + "/v1internal")
 
 
 class FakeResponse:
@@ -152,7 +174,10 @@ class ProbeRedactTest(unittest.TestCase):
         probe = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(probe)
         out = probe.redact({"user_id": "user-80abc", "accountId": "6ff7e51b", "email": "a@b.co", "plan_type": "pro",
+                            "org_id": 123456789, "used_percent": 14,
                             "note": "mail a@b.co key TESTTOKEN0123456789abcdefghijk"})
+        self.assertEqual(out["org_id"], "<redacted>")     # 숫자 ID도 가림
+        self.assertEqual(out["used_percent"], 14)
         self.assertEqual(out["user_id"], "<redacted>")
         self.assertEqual(out["accountId"], "<redacted>")
         self.assertEqual(out["email"], "<redacted>")
@@ -162,8 +187,12 @@ class ProbeRedactTest(unittest.TestCase):
 
 
 class WindowsTest(unittest.TestCase):
-    def test_work_area_at_returns_a_rectangle(self):
-        left, top, right, bottom = winutil.work_area_at(10, 10)
+    def test_work_area_at_primary_center_matches_primary_work_area(self):
+        left, top, right, bottom = winutil.work_area()
+        self.assertEqual(winutil.work_area_at((left + right) // 2, (top + bottom) // 2), (left, top, right, bottom))
+
+    def test_work_area_at_far_away_point_returns_nearest_monitor(self):
+        left, top, right, bottom = winutil.work_area_at(10 ** 6, 10 ** 6)
         self.assertLess(left, right)
         self.assertLess(top, bottom)
 
