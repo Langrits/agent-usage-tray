@@ -7,6 +7,7 @@ claude.ai 웹 주소는 Cloudflare가 프로그램 접속을 막아서 쓰지 �
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -15,6 +16,8 @@ import requests
 from ..i18n import t
 from ..models import ResetCredits, Usage, Window
 from ._util import USER_AGENT, HOME, LoginProblem, Options, epoch, read_json, write_json_atomic
+
+log = logging.getLogger("agent_usage")
 
 ID = "claude"
 TITLE = "Claude"
@@ -70,6 +73,7 @@ def _access_token(opts: Options) -> tuple[str, dict]:
     if tok.get("scope"):
         oauth["scopes"] = tok["scope"].split()
     write_json_atomic(CRED_PATH, creds)
+    log.info("claude: login renewed (expires %s)", time.strftime("%m-%d %H:%M", time.localtime(oauth["expiresAt"] / 1000)))
     return oauth["accessToken"], oauth
 
 

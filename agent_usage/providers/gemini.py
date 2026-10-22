@@ -10,6 +10,7 @@ Gemini CLI 로그인(~/.gemini/oauth_creds.json)으로 Gemini CLI가 쓰는 Code
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -20,6 +21,8 @@ import requests
 from ..i18n import t
 from ..models import Usage, Window
 from ._util import HOME, USER_AGENT, LoginProblem, Options, epoch, read_json, write_json_atomic
+
+log = logging.getLogger("agent_usage")
 
 ID = "gemini"
 TITLE = "Gemini"
@@ -112,6 +115,7 @@ def _access_token(opts: Options) -> str:
         if tok.get(k):
             creds[k] = tok[k]
     write_json_atomic(CREDS_PATH, creds)
+    log.info("gemini: login renewed (expires %s)", time.strftime("%m-%d %H:%M", time.localtime(creds["expiry_date"] / 1000)))
     return creds["access_token"]
 
 
