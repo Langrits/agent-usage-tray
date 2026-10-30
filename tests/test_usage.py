@@ -46,6 +46,8 @@ class NotifyTest(unittest.TestCase):
         self.assertTrue(same_cycle(base, base - CYCLE_TOLERANCE_S + 1))
         self.assertFalse(same_cycle(base, base + CYCLE_TOLERANCE_S + 1))
         self.assertFalse(same_cycle(base, base - CYCLE_TOLERANCE_S - 1))
+        self.assertFalse(same_cycle(base, base + CYCLE_TOLERANCE_S))      # 정확히 10분부터 다른 주기
+        self.assertFalse(same_cycle(base, base - CYCLE_TOLERANCE_S))
         self.assertTrue(same_cycle("no-reset-time", "no-reset-time"))
         self.assertFalse(same_cycle(None, base))
 
