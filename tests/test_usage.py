@@ -16,9 +16,120 @@ from agent_usage import i18n, winutil  # noqa: E402
 from agent_usage.models import Usage, Window  # noqa: E402
 from agent_usage.notify import Notifier  # noqa: E402
 from agent_usage.providers import BY_ID, Options, claude, codex, cursor, fetch_one, gemini  # noqa: E402
-from agent_usage.store import History, settings  # noqa: E402
+from agent_usage.store import History, legacy_dirs, migrate_legacy, settings  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class LegacyMergeTest(unittest.TestCase):
+    """0.1.x가 두 곳(AppData 원래 위치, 스토어 앱 전용 사본)에 나눠 남긴 기록을 새 위치로 합친다."""
+
+    def make_legacy(self, rows, settings_text, mtime):
+        import sqlite3
+        d = tempfile.mkdtemp()
+        con = sqlite3.connect(os.path.join(d, "history.sqlite"))
+        con.execute("create table samples (ts real, provider text, window text, label text, used real, resets_at real)")
+        con.executemany("insert into samples values (?,?,?,?,?,?)", rows)
+        con.commit()
+        con.close()
+        path = os.path.join(d, "settings.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(settings_text)
+        os.utime(path, (mtime, mtime))
+        return d
+
+    def count(self, target):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(target, "history.sqlite"))
+        try:
+            return con.execute("select count(*) from samples").fetchone()[0]
+        finally:
+            con.close()
+
+    def test_merges_both_without_duplicates_and_takes_newest_settings(self):
+        shared = (1000.0, "claude", "five_hour", "5h", 10.0, None)
+        a = self.make_legacy([shared, (1100.0, "claude", "five_hour", "5h", 12.0, None)], '{"pinned": false}', 1_000)
+        b = self.make_legacy([shared, (2000.0, "codex", "weekly", "W", 30.0, None)], '{"pinned": true}', 2_000)
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a, b])
+        self.assertEqual(self.count(target), 3)
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})          # 더 최근 것
+        migrate_legacy(target, [a, b])                                # 바뀐 게 없으면 다시 합쳐도 그대로
+        self.assertEqual(self.count(target), 3)
+
+    def test_broken_newest_settings_falls_back_to_valid_copy(self):
+        a = self.make_legacy([], '{"pinned": true}', 1_000)
+        b = self.make_legacy([], '{"pinned": tr', 2_000)                # 더 최근이지만 잘린 파일
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a, b])
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})
+        self.assertFalse(os.path.exists(os.path.join(target, "settings.json.tmp")))
+
+    def test_settings_that_are_not_an_object_are_skipped(self):
+        a = self.make_legacy([], '{"pinned": true}', 1_000)
+        b = self.make_legacy([], 'null', 2_000)                          # 더 최근이지만 객체가 아님
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a, b])
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})
+
+    def test_settings_file_with_null_starts_from_defaults(self):
+        import agent_usage.store as store
+        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
+            self.skipTest("store points at the real data folder")
+        with open(os.path.join(store.DATA_DIR, "null_test.json"), "w", encoding="utf-8") as f:
+            f.write("null")
+        self.assertEqual(store.JsonFile("null_test.json", {"a": 1}).data, {"a": 1})
+
+    def remove_all(self, target):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(target, "history.sqlite"))
+        con.execute("delete from samples")
+        con.commit()
+        con.close()
+
+    def add_row(self, src, row, mtime):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(src, "history.sqlite"))
+        con.execute("insert into samples values (?,?,?,?,?,?)", row)
+        con.commit()
+        con.close()
+        os.utime(os.path.join(src, "history.sqlite"), (mtime, mtime))
+
+    def test_remerges_only_changed_sources(self):
+        a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
+        os.utime(os.path.join(a, "history.sqlite"), (5_000, 5_000))
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a])
+        self.remove_all(target)
+        migrate_legacy(target, [a])
+        self.assertEqual(self.count(target), 0)                       # 바뀌지 않은 원본은 다시 읽지 않는다
+        self.add_row(a, (2000.0, "claude", "five_hour", "5h", 20.0, None), 6_000)
+        migrate_legacy(target, [a])
+        self.assertEqual(self.count(target), 2)                       # 바뀐 원본은 전부 다시 합친다
+        self.remove_all(target)
+        os.utime(os.path.join(a, "history.sqlite"), (4_000, 4_000))   # 예전 백업으로 되돌려 시각이 줄어도
+        migrate_legacy(target, [a])
+        self.assertEqual(self.count(target), 2)
+
+    def test_recreated_target_db_merges_everything_again(self):
+        a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a])
+        os.remove(os.path.join(target, "history.sqlite"))             # 합친 기록과 '어디까지 합쳤는지'가 함께 사라짐
+        migrate_legacy(target, [a])
+        self.assertEqual(self.count(target), 1)
+
+    def test_legacy_dirs_include_store_app_copies(self):
+        local = tempfile.mkdtemp()
+        real = os.path.join(local, "AgentUsage")
+        boxed = os.path.join(local, "Packages", "Claude_x", "LocalCache", "Local", "AgentUsage")
+        os.makedirs(real)
+        os.makedirs(boxed)
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": local}):
+            self.assertEqual(legacy_dirs(), [real, boxed])
 
 
 class NotifyTest(unittest.TestCase):
@@ -77,6 +188,10 @@ class NotifyTest(unittest.TestCase):
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
+        # 이 테스트는 기록을 비운다. 다른 테스트가 먼저 store를 불러와 실제 기록 폴더를 가리키고 있으면 절대 실행하지 않는다
+        import agent_usage.store as store
+        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
+            self.skipTest("store points at the real data folder")
         self.h = History()
         self.h.con.execute("delete from samples")
         self.h.con.commit()

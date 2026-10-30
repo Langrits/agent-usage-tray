@@ -69,7 +69,9 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 | 윈도우 시작 시 자동 실행 | 꺼짐 |
 | 언어: 자동 / 한국어 / English | 자동 |
 
-설정·기록·로그는 `%LOCALAPPDATA%\AgentUsage`에 저장돼요.
+설정·기록·로그는 `%USERPROFILE%\.ai-usage-tray`에 저장돼요.
+
+0.1.1까지는 `%LOCALAPPDATA%\AgentUsage`를 썼어요. 그런데 이 프로그램을 스토어(MSIX) 앱 안에서 실행하면, Windows가 그 기록을 해당 앱 전용 폴더(`%LOCALAPPDATA%\Packages\<앱>\LocalCache\Local\AgentUsage`)로 돌려 저장해요. 그래서 기록이 두 곳에 나뉠 수 있었어요. 지금 버전은 시작할 때 이 위치들의 기록을 모두 새 폴더로 합쳐요. 예전 폴더를 읽지 못하면 다음에 시작할 때 다시 시도해요. 앱에서 예전 기록이 보이는 걸 확인한 뒤에 예전 폴더를 지우세요.
 
 ## 개인정보와 동작 방식
 
@@ -89,7 +91,7 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 ## 업데이트 / 삭제
 
 - 업데이트: `git pull` 후 `install.cmd`를 다시 실행하세요.
-- 삭제: 설정에서 **윈도우 시작 시 자동 실행**을 끄고, 트레이 메뉴에서 종료하세요. 그다음 폴더와 `%LOCALAPPDATA%\AgentUsage`를 지우면 돼요.
+- 삭제: 설정에서 **윈도우 시작 시 자동 실행**을 끄고, 트레이 메뉴에서 종료하세요. 그다음 프로그램 폴더와 `%USERPROFILE%\.ai-usage-tray`를 지우면 돼요. 예전 버전이 남긴 `%LOCALAPPDATA%\AgentUsage`가 있으면 그것도 지우세요.
 
 ## 문제 해결
 
