@@ -27,8 +27,8 @@ class CodexLog:
         self.parent_thread = None
         self.updated = None
         self.first_prompt = None
-        self.turn_open = False
-        self.waiting = False
+        self.turn_open: bool | None = False      # None: 건너뛴 구간 때문에 모름
+        self.waiting: set[str] = set()           # 답을 기다리는 승인 요청의 call_id ("?" = ID 없음)
         self.limit_reached = False
         self.turn_at = self.wait_at = self.limit_at = None
 
@@ -43,7 +43,8 @@ class CodexLog:
         return {RUNNING: self.turn_at, WAITING: self.wait_at, LIMITED: self.limit_at}.get(self.state)
 
     def gap(self) -> None:
-        """앞부분과 끝부분 사이를 건너뛰었다: 그 사이에 턴이 몇 번 있었는지 모르니 시작 시각은 버린다."""
+        """앞부분과 끝부분 사이를 건너뛰었다: 앞부분에서 본 상태는 버리고 끝부분의 기록으로만 정한다."""
+        self.turn_open, self.waiting, self.limit_reached = None, set(), False
         self.turn_at = self.wait_at = self.limit_at = None
 
     def feed(self, rec: dict) -> None:
@@ -70,20 +71,28 @@ class CodexLog:
                     self.first_prompt = text
                     break
         elif kind == "task_started":
-            self.turn_open, self.waiting, self.limit_reached, self.turn_at = True, False, False, ts
+            self.turn_open, self.waiting, self.limit_reached, self.turn_at = True, set(), False, ts
         elif kind in ("task_complete", "turn_aborted"):
-            self.turn_open, self.waiting = False, False
+            self.turn_open, self.waiting = False, set()
         elif kind in PROGRESS:
-            self.waiting = False
+            if self.turn_open is None:           # 턴 안에서만 생기는 기록이므로 턴은 진행 중 (시작 시각은 모름)
+                self.turn_open = True
+            # 그 승인 요청의 명령이 실행되면 대기가 끝난다. 다른 명령의 진행으로는 끝나지 않는다
+            self.waiting.discard(payload.get("call_id"))
+            self.waiting.discard("?")
         elif kind == "token_count":
-            reached = bool((payload.get("rate_limits") or {}).get("rate_limit_reached_type"))
-            if reached and not self.limit_reached:
-                self.limit_at = ts
-            self.limit_reached = reached
+            limits = payload.get("rate_limits")
+            if isinstance(limits, dict):         # 한도 정보가 빠진 기록은 이전 상태를 그대로 둔다
+                reached = bool(limits.get("rate_limit_reached_type"))
+                if reached and not self.limit_reached:
+                    self.limit_at = ts
+                self.limit_reached = reached
         elif isinstance(kind, str) and kind.endswith("approval_request"):
+            if self.turn_open is None:
+                self.turn_open = True
             if not self.waiting:
                 self.wait_at = ts
-            self.waiting = True
+            self.waiting.add(payload.get("call_id") or "?")
 
 
 def collect(since: float, now: float, cache: JsonlCache) -> list[Item]:

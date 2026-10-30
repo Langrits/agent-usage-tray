@@ -44,29 +44,31 @@ def duration(secs: float) -> str:
     return t("dur_hm", h=hours, m=mins) if mins else t("dur_h", h=hours)
 
 
-def limit_note(windows) -> str:
-    """한도로 멈춘 작업 옆에 붙일 말: 다 쓴 한도가 풀리는 시각, 이미 풀렸으면 '한도 초기화됨'.
+def limit_note(usage, stopped_at: float | None) -> str:
+    """한도로 멈춘 작업 아래에 붙일 말: 다 쓴 한도가 풀리는 시각, 이미 풀렸으면 '한도 초기화됨'.
 
-    windows는 그 서비스의 마지막 사용량 조회 결과 (없으면 None → 아무 말도 붙이지 않는다).
+    usage는 그 서비스의 마지막 사용량 조회 결과. 멈춘 뒤에 조회한 결과로만 말한다 (그 전 값으로는 모른다).
     """
-    if not windows:
+    if usage is None or stopped_at is None or usage.data_at < stopped_at:
         return ""
-    spent = [w for w in windows if w.used_pct is not None and w.used_pct >= 99.5]
+    known = [w for w in usage.windows if w.used_pct is not None]
+    if not known:
+        return ""
+    spent = [w for w in known if w.used_pct >= 99.5]
     if not spent:
         return t("a_reset_done")
     resets = [w.resets_at for w in spent if w.resets_at]
     return t("a_resets", clock=fmt.clock(max(resets))) if len(resets) == len(spent) else ""   # 여럿이면 늦게 풀리는 것
 
 
-def status_line(item: Item, now: float, windows=None) -> str:
-    """둘째 줄: '앱 · 상태 · 시간'."""
+def status_line(item: Item, now: float) -> str:
+    """둘째 줄: '앱 · 상태 · 걸린 시간' (시작 시각을 기록에서 못 찾으면 시간은 뺀다)."""
     if item.status == STALLED:
         text = t("a_stalled", d=duration(now - (item.updated_at or now)))
     else:
         text = t(f"a_{item.status}")
-        extra = limit_note(windows) if item.status == LIMITED else (duration(now - item.since) if item.since else "")
-        if extra:
-            text += " · " + extra
+        if item.since and item.status != LIMITED:
+            text += " · " + duration(now - item.since)
     return f"{item.label} · {text}"
 
 
@@ -102,7 +104,8 @@ class ActivityPanel:
                  bg=pal["bg"]).pack(side="left")
         self.count = tk.Label(head, text="", font=(theme.FONT, 9), fg=pal["muted"], bg=pal["bg"])
         self.count.pack(side="right", pady=(px(2), 0))
-        self.title_font = tkfont.Font(family=theme.FONT, size=9)
+        self.title_font = tkfont.Font(family=theme.FONT, size=9)     # 줄일 폭을 재려고 실제 글꼴을 쓴다
+        self.sub_font = tkfont.Font(family=theme.FONT, size=8)
 
     def show(self) -> None:
         if not self.win:
@@ -138,8 +141,9 @@ class ActivityPanel:
         w = self.px(WIDTH)
         x = panel_x(x0, x1 - x0, w, self.px(GAP), left, right)
         self.frame.update_idletasks()
-        h = min(self.frame.winfo_reqheight() + 2, bottom - y0)
-        self.win.geometry(f"{w}x{h}+{x}+{y0}")
+        h = self.frame.winfo_reqheight() + 2
+        y = max(top, min(y0, bottom - h))       # 위쪽은 팝업에 맞추되, 아래가 화면 밖으로 나가면 그만큼 올린다
+        self.win.geometry(f"{w}x{min(h, bottom - y)}+{x}+{y}")
 
     # ── 내용 ─────────────────────────────────────────────
     def redraw(self) -> None:
@@ -155,16 +159,19 @@ class ActivityPanel:
             self._build(snap, shown, len(items) - len(shown))
             self._sig = sig
         now = time.time()
-        width = self.px(WIDTH) - self.px(62)          # 패널 여백·상태 점을 뺀 제목 폭
+        width = self.px(WIDTH) - self.px(62)          # 패널 여백·상태 점을 뺀 글자 폭
         for refs, item in zip(self.rows, shown):
             refs["title"].configure(text=elide(item.title, width, self.title_font.measure))
-            refs["sub"].configure(text=status_line(item, now, self._windows(item)))
+            refs["sub"].configure(text=elide(status_line(item, now), width, self.sub_font.measure))
+            if "note" in refs:              # 한도로 멈춘 작업: 한도가 풀리는 시각은 셋째 줄에 (잘리지 않게)
+                note = limit_note(self.app.good.get(item.agent), item.since)
+                refs["note"].configure(text=elide(note, width, self.sub_font.measure))
+                if note:
+                    refs["note"].grid()
+                else:
+                    refs["note"].grid_remove()
         self.count.configure(text=t("a_count", n=len(items)) if items else "")
         self.follow()
-
-    def _windows(self, item: Item):
-        good = self.app.good.get(item.agent)
-        return good.windows if good else None
 
     def _build(self, snap, shown: list[Item], more: int) -> None:
         pal, px = self.pal, self.px
@@ -201,10 +208,16 @@ class ActivityPanel:
         dot.grid(row=0, column=0, rowspan=2, sticky="n", padx=(px(8), px(6)), pady=(px(6), 0))
         title = tk.Label(row, text="", font=self.title_font, fg=pal["text"], bg=pal["card"], anchor="w")
         title.grid(row=0, column=1, sticky="w", pady=(px(5), 0), padx=(0, px(8)))
-        sub = tk.Label(row, text="", font=(theme.FONT, 8), anchor="w", bg=pal["card"],
+        sub = tk.Label(row, text="", font=self.sub_font, anchor="w", bg=pal["card"],
                        fg=pal["muted"] if item.status == STALLED else pal["text2"])
         sub.grid(row=1, column=1, sticky="w", pady=(0, px(6)), padx=(0, px(8)))
-        parts = (row, dot, title, sub)
+        refs = {"title": title, "sub": sub}
+        if item.status == LIMITED:
+            note = tk.Label(row, text="", font=self.sub_font, anchor="w", bg=pal["card"], fg=pal["text2"])
+            sub.grid_configure(pady=0)
+            note.grid(row=2, column=1, sticky="w", pady=(0, px(6)), padx=(0, px(8)))
+            refs["note"] = note
+        parts = (row, dot, *refs.values())
         if item.open_url:
             def paint(bg):
                 for w in parts:
@@ -217,7 +230,7 @@ class ActivityPanel:
                 w.bind("<Enter>", lambda e: paint(pal["hover"]))
                 w.bind("<Leave>", leave)
                 w.bind("<Button-1>", lambda e, url=item.open_url: self._open(url))
-        return {"title": title, "sub": sub}
+        return refs
 
     def _open(self, url: str) -> None:
         try:

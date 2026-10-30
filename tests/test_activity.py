@@ -20,7 +20,7 @@ from agent_usage.activity.claude import ClaudeLog
 from agent_usage.activity.codex import CodexLog
 from agent_usage.activity.model import GONE_S, KEEP_S, LIMITED, RUNNING, STALL_S, STALLED, WAITING, Item, settle
 from agent_usage.activity_panel import duration, elide, limit_note, status_line
-from agent_usage.models import Window
+from agent_usage.models import Usage, Window
 
 NL = "\n"
 
@@ -100,6 +100,12 @@ class ClaudeStateTest(unittest.TestCase):
                     "error": "rate_limit", "message": {"role": "assistant", "content": []}})
         self.assertEqual((log.state, round(log.since)), (LIMITED, round(self.now - 50)))
 
+    def test_unanswered_question_does_not_come_back_after_a_new_request(self):
+        log = feed(ClaudeLog(), user(self.now - 90), tool_use(self.now - 80, "AskUserQuestion", questions=[]),
+                   user(self.now - 60, "never mind, do this"), tool_use(self.now - 50, "Bash", "t2", command="ls"),
+                   tool_result(self.now - 40, "t2"), end_turn(self.now - 30))
+        self.assertIsNone(log.state)
+
     def test_turn_start_unknown_when_only_the_end_was_read(self):
         log = feed(ClaudeLog(), tool_use(self.now - 50, "Bash", command="ls"))
         self.assertEqual((log.state, log.since), (RUNNING, None))
@@ -146,11 +152,32 @@ class CodexStateTest(unittest.TestCase):
         log.feed(self.event(now - 60, "task_complete"))
         self.assertEqual((log.state, round(log.since)), (LIMITED, round(now - 70)))
 
-    def test_gap_forgets_when_the_turn_started(self):
+    def test_after_a_gap_only_the_tail_decides(self):
         now = time.time()
-        log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"))
-        log.gap()
+        log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"),
+                   self.event(now - 85, "exec_approval_request", call_id="a"))
+        log.gap()                                         # 앞부분의 승인 대기는 그 사이에 끝났을 수 있다
+        self.assertIsNone(log.state)
+        log.feed(self.event(now - 10, "exec_command_begin", call_id="b"))   # 턴 안에서만 생기는 기록
         self.assertEqual((log.state, log.since), (RUNNING, None))
+
+    def test_approval_ends_only_with_its_own_command(self):
+        now = time.time()
+        log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"),
+                   self.event(now - 80, "exec_approval_request", call_id="a"),
+                   self.event(now - 70, "exec_command_end", call_id="b"),
+                   self.event(now - 65, "agent_message", message="still waiting"))
+        self.assertEqual(log.state, WAITING)
+        log.feed(self.event(now - 60, "exec_command_begin", call_id="a"))
+        self.assertEqual(log.state, RUNNING)
+
+    def test_usage_record_without_limits_keeps_the_limit(self):
+        now = time.time()
+        log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"),
+                   self.event(now - 80, "token_count", rate_limits={"rate_limit_reached_type": "primary"}),
+                   self.event(now - 75, "token_count", info={"total_token_usage": {}}),
+                   self.event(now - 70, "task_complete"))
+        self.assertEqual(log.state, LIMITED)
 
     def test_collect_skips_subagents_and_finished_runs(self):
         now = time.time()
@@ -280,6 +307,13 @@ class JsonlCacheTest(unittest.TestCase):
         self.write('{"i": 100}' + NL, "a")                                 # 이어 붙은 줄은 그대로 읽는다
         self.assertEqual(cache.get(self.path, Counter, first=20, last=30).ids, [0, 1, 97, 98, 99, 100])
 
+    def test_rewrite_with_the_same_start_and_size_is_read_again(self):
+        cache = JsonlCache()
+        self.write('{"i": 1}' + NL + '{"i": 2}' + NL)
+        cache.get(self.path, Counter)
+        self.write('{"i": 1}' + NL + '{"i": 5}' + NL)                       # 앞부분·크기가 같고 내용만 다름
+        self.assertEqual(cache.get(self.path, Counter).ids, [1, 5])
+
     def test_prune_drops_unused_files(self):
         cache = JsonlCache()
         self.write('{"i": 1}' + NL)
@@ -310,12 +344,21 @@ class PanelTextTest(unittest.TestCase):
         self.assertEqual(duration(3600 + 5 * 60), "1시간 5분")
 
     def test_limit_note_uses_the_last_reset_of_spent_limits(self):
-        now = time.time()
-        spent = [Window("five_hour", "5h", 100, now + 3600), Window("seven_day", "W", 100, now + 7200)]
         from agent_usage import format as fmt
-        self.assertEqual(limit_note(spent), i18n.t("a_resets", clock=fmt.clock(now + 7200)))
-        self.assertEqual(limit_note([Window("five_hour", "5h", 40, now + 3600)]), "한도 초기화됨")
-        self.assertEqual(limit_note(None), "")
+        now = time.time()
+        spent = Usage("claude", "Claude", windows=[Window("five_hour", "5h", 100, now + 3600),
+                                                   Window("seven_day", "W", 100, now + 7200)], data_at=now)
+        self.assertEqual(limit_note(spent, now - 60), i18n.t("a_resets", clock=fmt.clock(now + 7200)))
+
+    def test_limit_note_says_reset_only_from_usage_read_after_the_stop(self):
+        now = time.time()
+        room = Usage("claude", "Claude", windows=[Window("five_hour", "5h", 40, now + 3600)], data_at=now - 300)
+        self.assertEqual(limit_note(room, now - 600), "한도 초기화됨")    # 멈춘 뒤 조회에서 여유가 있다
+        self.assertEqual(limit_note(room, now - 60), "")                  # 멈추기 전 조회값으로는 모른다
+        unknown = Usage("claude", "Claude", windows=[Window("five_hour", "5h", None, None)], data_at=now)
+        self.assertEqual(limit_note(unknown, now - 600), "")
+        self.assertEqual(limit_note(None, now - 600), "")
+        self.assertEqual(limit_note(room, None), "")
 
     def test_status_line(self):
         now = time.time()

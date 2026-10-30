@@ -9,6 +9,7 @@ from datetime import datetime
 
 _LONG = chr(92) * 2 + "?" + chr(92)    # Windows 긴 경로 접두어 (\\?\)
 HEAD_BYTES = 256                       # 파일이 새로 쓰였는지 비교할 앞부분
+MARK_BYTES = 64                        # 같은 앞부분으로 다시 쓴 파일을 알아보려고 지난번 읽은 끝 앞부분도 비교한다
 CHUNK = 4 << 20                        # 큰 기록은 4MB씩 읽는다
 
 
@@ -55,18 +56,23 @@ class JsonlCache:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._items: dict[str, tuple[int, bytes, object]] = {}   # path -> (읽은 바이트, 앞부분, 요약)
+        # path -> (읽은 바이트, 앞부분, 읽은 끝 바로 앞 바이트, 요약)
+        self._items: dict[str, tuple[int, bytes, bytes, object]] = {}
         self._used: set[str] = set()
 
     def get(self, path: str, factory, first: int = 0, last: int = 0):
         with self._lock:
             self._used.add(path)
-            offset, head, summary = self._items.get(path, (0, b"", None))
+            offset, head, mark, summary = self._items.get(path, (0, b"", b"", None))
             try:
                 size = os.path.getsize(lp(path))
                 with open(lp(path), "rb") as f:
                     current_head = f.read(HEAD_BYTES)
-                    if summary is None or size < offset or current_head[:len(head)] != head:
+                    changed = summary is None or size < offset or current_head[:len(head)] != head
+                    if not changed and mark:          # 앞부분이 같게 다시 쓴 파일: 지난번 읽은 끝도 그대로인지 본다
+                        f.seek(offset - len(mark))
+                        changed = f.read(len(mark)) != mark
+                    if changed:
                         offset, summary = 0, factory()
                         if last and size > first + last:
                             if first:
@@ -77,11 +83,16 @@ class JsonlCache:
                             f.seek(size - last - 1)
                             f.readline()                     # 줄 중간이면 그 줄은 버린다 (바로 앞이 줄바꿈이면 그대로)
                             offset = f.tell()
+                if size > offset:
+                    offset = self._feed(path, offset, summary)
+                    with open(lp(path), "rb") as f:
+                        f.seek(max(0, offset - MARK_BYTES))
+                        mark = f.read(offset - max(0, offset - MARK_BYTES))
+                elif changed:
+                    mark = b""
             except OSError:
                 return None
-            if size > offset:
-                offset = self._feed(path, offset, summary)
-            self._items[path] = (offset, current_head, summary)
+            self._items[path] = (offset, current_head, mark, summary)
             return summary
 
     def prune(self) -> None:

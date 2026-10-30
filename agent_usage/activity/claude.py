@@ -89,6 +89,8 @@ class ClaudeLog:
                 prompt = True
         if prompt:
             self.blocked = False
+            # 답하지 않고 새 요청을 보낸 질문은 더 기다리지 않는다 (진행 중인 다른 도구 결과는 계속 기다린다)
+            self.pending = {k: v for k, v in self.pending.items() if v not in WAIT_TOOLS}
             self.turn_at = ts
             self._set(RUNNING, ts)
 
