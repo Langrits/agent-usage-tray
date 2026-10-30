@@ -306,9 +306,10 @@ class Popup:
     def scrolling(self) -> bool:
         return self._scrolling
 
-    def card_frames(self) -> dict:
-        """서비스 ID → 카드 프레임 (기록 패널이 같은 높이에 그래프를 놓는 데 쓴다)."""
-        return {pid: refs["frame"] for pid, refs in self.refs.get("cards", {}).items() if "frame" in refs}
+    def card_layout(self) -> dict:
+        """서비스 ID → (카드 프레임, 사용량 줄 수). 기록 패널이 그래프 위치·크기를 정하는 데 쓴다."""
+        return {pid: (refs["frame"], len(refs.get("rows", {})))
+                for pid, refs in self.refs.get("cards", {}).items() if "frame" in refs}
 
     # ── 기록 패널 ─────────────────────────────────────────
     def toggle_history(self) -> None:

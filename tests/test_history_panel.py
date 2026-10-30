@@ -1,7 +1,35 @@
 """사용 기록 패널의 위치 계산과 데이터 묶기 테스트 (창은 띄우지 않는다)."""
 import unittest
 
-from agent_usage.history_panel import group_series, panel_x
+from agent_usage.history_panel import fit_legend, group_series, panel_x, uniform_height
+
+
+class UniformHeightTest(unittest.TestCase):
+    def test_uses_the_shortest_single_row_card(self):
+        # Claude(3줄, 262px), Codex(1줄+재설정권, 143px), Cursor(1줄, 140px)
+        self.assertEqual(uniform_height([(262, 3), (143, 1), (140, 1)], 150), 140)
+
+    def test_falls_back_when_no_card_has_a_single_row(self):
+        self.assertEqual(uniform_height([(262, 3), (80, 0)], 150), 150)
+
+
+class FitLegendTest(unittest.TestCase):
+    measure = staticmethod(lambda s: len(s) * 7)
+
+    def test_names_fit_on_one_line_as_they_are(self):
+        labels = ["5시간", "주간", "주간(Fable)"]
+        self.assertEqual(fit_legend(labels, 200, self.measure, 22), (labels, 0))
+
+    def test_drops_a_shared_suffix_before_hiding_items(self):
+        labels = ["2.5 Pro (하루)", "2.5 Flash (하루)"]
+        shown, hidden = fit_legend(labels, 160, self.measure, 22)
+        self.assertEqual((shown, hidden), (["2.5 Pro", "2.5 Flash"], 0))
+
+    def test_hides_items_from_the_end_with_a_count(self):
+        labels = ["Alpha model", "Beta model", "Gamma model", "Delta model"]
+        shown, hidden = fit_legend(labels, 220, self.measure, 22)
+        self.assertEqual(shown, ["Alpha model", "Beta model"])
+        self.assertEqual(hidden, 2)
 
 
 class PanelPositionTest(unittest.TestCase):

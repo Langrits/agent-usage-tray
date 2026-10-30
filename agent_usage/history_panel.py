@@ -1,14 +1,16 @@
 """팝업 옆에 붙는 사용 기록 패널: 서비스마다 미니 그래프 하나 (사용한 비율, 0~100%).
 
 패널은 테두리 없는 창으로 팝업 왼쪽(자리가 없으면 오른쪽)에 붙고, 팝업과 높이를 맞춘다.
-각 서비스 구역은 팝업의 같은 서비스 카드와 같은 높이에 놓여서 나란히 읽힌다.
+그래프는 모두 같은 크기(사용량이 1줄인 카드 높이)이고, 각 서비스 카드의 위쪽에 맞춰 놓여 나란히 읽힌다.
 """
 from __future__ import annotations
 
 import bisect
+import re
 import time
 import tkinter as tk
 from datetime import datetime
+from tkinter import font as tkfont
 
 from . import theme, winutil
 from .i18n import t
@@ -27,6 +29,37 @@ def panel_x(popup_x: int, popup_w: int, panel_w: int, gap: int, area_left: int, 
         return left
     right = popup_x + popup_w + gap
     return right if right + panel_w <= area_right else max(area_left, left)
+
+
+def uniform_height(cards: list[tuple[int, int]], default: int) -> int:
+    """모든 그래프에 쓸 높이: 사용량이 1줄인 카드 중 가장 낮은 높이 (없으면 기본값). cards=[(높이, 줄 수)]"""
+    singles = [h for h, rows in cards if rows == 1 and h > 1]
+    return min(singles) if singles else default
+
+
+_SUFFIX = re.compile(r"\s*\([^()]*\)$")
+
+
+def fit_legend(labels: list[str], width: int, measure, extra: int) -> tuple[list[str], int]:
+    """범례를 한 줄에 맞춘다: (보여줄 이름들, 숨긴 개수).
+
+    measure(글자) → 픽셀 폭, extra = 항목마다 붙는 선 표시·간격 폭.
+    넘치면 ① 모든 이름에 같은 꼬리표("(하루)" 등)가 있을 때 떼고 ② 그래도 넘치면 뒤에서부터 빼고 "+N"을 붙인다.
+    """
+    def total(items, hidden=0):
+        return sum(measure(s) + extra for s in items) + (measure(f"+{hidden}") if hidden else 0)
+
+    if total(labels) <= width:
+        return labels, 0
+    tails = {(_SUFFIX.search(s) or [None])[0] for s in labels}
+    if len(labels) > 1 and len(tails) == 1 and None not in tails:
+        labels = [_SUFFIX.sub("", s) for s in labels]
+        if total(labels) <= width:
+            return labels, 0
+    shown = list(labels)
+    while len(shown) > 1 and total(shown, len(labels) - len(shown)) > width:
+        shown.pop()
+    return shown, len(labels) - len(shown)
 
 
 def group_series(series: dict, visible: list[str]) -> dict[str, dict[str, list]]:
@@ -104,24 +137,25 @@ class HistoryPanel:
 
     def _layout_sections(self, height: int) -> None:
         self.frame.update_idletasks()
-        cards = self.popup.card_frames()
+        layout = self.popup.card_layout()
         top_y = self.head.winfo_y() + self.head.winfo_height() + self.px(4)   # 패널 머리글 아래
-        aligned = cards and not self.popup.scrolling and all(pid in cards for pid in self.sections)
+        # 그래프 크기는 모두 같게: 사용량이 1줄인 카드 높이 (Claude처럼 줄이 많은 카드에 맞춰 커지지 않게)
+        chart_h = uniform_height([(f.winfo_height(), rows) for f, rows in layout.values()], self.px(140))
+        aligned = layout and not self.popup.scrolling and all(pid in layout for pid in self.sections)
         if aligned:
-            # 두 창은 위쪽 높이가 같으므로 팝업 창 기준으로 잰다 (막 옮긴 패널 자신의 위치는 아직 옛값일 수 있다).
-            # -1: 패널 프레임은 테두리 1px 안쪽에서 시작한다
+            # 각 그래프 위쪽을 그 서비스 카드 위쪽에 맞춘다. 두 창은 위쪽 높이가 같으므로 팝업 창 기준으로 잰다
+            # (막 옮긴 패널 자신의 위치는 아직 옛값일 수 있다). +1: 패널 프레임은 테두리 1px 안쪽에서 시작한다
             base = self.popup.win.winfo_rooty() + 1
             for pid, canvas in self.sections.items():
-                card = cards[pid]
-                y = card.winfo_rooty() - base
-                canvas.place(x=self.px(10), y=max(y, top_y), relwidth=1, width=-self.px(20),
-                             height=card.winfo_height() - max(0, top_y - y))
-        else:      # 팝업이 화면보다 길어 스크롤될 때는 카드에 맞추지 않고 머리글 아래를 고르게 나눈다
-            n = max(1, len(self.sections))
-            each = max(self.px(90), (height - top_y - self.px(8)) // n)
+                card = layout[pid][0]
+                y = max(card.winfo_rooty() - base, top_y)
+                canvas.place(x=self.px(10), y=y, relwidth=1, width=-self.px(20),
+                             height=min(chart_h, card.winfo_height()))
+        else:      # 팝업이 화면보다 길어 스크롤될 때는 카드에 맞추지 않고 머리글 아래부터 차례로 쌓는다
+            gap = self.px(8)
             for i, canvas in enumerate(self.sections.values()):
-                canvas.place(x=self.px(10), y=top_y + i * each, relwidth=1, width=-self.px(20),
-                             height=each - self.px(8))
+                canvas.place(x=self.px(10), y=top_y + i * (chart_h + gap), relwidth=1, width=-self.px(20),
+                             height=chart_h)
         for canvas in self.sections.values():
             canvas.update_idletasks()
             self._draw(canvas)
@@ -179,21 +213,38 @@ class HistoryPanel:
 
     def _geometry(self, c: tk.Canvas):
         w, h = c.winfo_width(), c.winfo_height()
-        rows = max([row for *_, row in self._legend_layout(c)] or [0]) + 1
-        top = self.px(14) + rows * self.px(14)                         # 실제 범례 줄 수만큼 비운다
-        return self.px(30), top, w - self.px(10), h - self.px(18)      # 왼, 위, 오른, 아래
+        return self.px(30), self.px(28), w - self.px(10), h - self.px(18)      # 왼, 위(제목·범례 한 줄), 오른, 아래
 
-    def _legend_layout(self, c: tk.Canvas) -> list[tuple[int, str, str, int]]:
-        """범례 배치 [(x, 글자, 색, 줄)]: 제목 오른쪽부터, 넘치면 다음 줄로."""
-        px, out = self.px, []
-        x, row = px(70), 0
-        for window, pts in self.data.get(c.pid, {}).items():
-            text = f"{pts[-1][2]} {pts[-1][1]:.0f}%"
-            width = len(text) * px(6) + px(16)
-            if x + width > c.winfo_width() - px(6) and x > px(8) and (row > 0 or x > px(70)):
-                x, row = px(8), row + 1
-            out.append((x, text, theme.series_color(self.pal, c.pid, window), row))
-            x += width
+    def _fonts(self):
+        if not hasattr(self, "_title_font"):      # 글자 폭을 정확히 재려고 실제 글꼴을 쓴다
+            self._title_font = tkfont.Font(family=theme.FONT, size=9, weight="bold")
+            self._small_font = tkfont.Font(family=theme.FONT, size=7)
+        return self._title_font, self._small_font
+
+    def _ordered_windows(self, pid: str) -> list[str]:
+        """범례 순서는 팝업 카드의 한도 순서를 따른다."""
+        series = self.data.get(pid, {})
+        good = self.app.good.get(pid)
+        order = [w.key for w in good.windows] if good else []
+        return sorted(series, key=lambda k: order.index(k) if k in order else len(order))
+
+    def _legend_layout(self, c: tk.Canvas) -> list[tuple[int, str, str | None]]:
+        """범례 배치 [(x, 글자, 색)]: 제목 오른쪽에 이름만 한 줄로. 넘치면 '+N'(색 없음)."""
+        px = self.px
+        title_font, small = self._fonts()
+        mod = BY_ID.get(c.pid)
+        x0 = px(8) + title_font.measure(mod.TITLE if mod else c.pid) + px(10)
+        series = self.data.get(c.pid, {})
+        windows = self._ordered_windows(c.pid)
+        labels = [series[w][-1][2] for w in windows]
+        marker = px(16)                               # 선 표시 + 간격
+        shown, hidden = fit_legend(labels, c.winfo_width() - x0 - px(6), small.measure, marker + px(6))
+        out, x = [], x0
+        for window, text in zip(windows, shown):
+            out.append((x, text, theme.series_color(self.pal, c.pid, window)))
+            x += small.measure(text) + marker + px(6)
+        if hidden:
+            out.append((x, f"+{hidden}", None))
         return out
 
     def _x(self, c: tk.Canvas, ts: float) -> float:
@@ -215,10 +266,13 @@ class HistoryPanel:
         mod = BY_ID.get(c.pid)
         c.create_text(px(8), px(4), text=mod.TITLE if mod else c.pid, anchor="nw",
                       font=(theme.FONT, 9, "bold"), fill=pal["text"])
-        for x, text, color, row in self._legend_layout(c):
-            y = px(10) + row * px(14)
-            c.create_line(x, y, x + px(10), y, fill=color, width=px(2))
-            c.create_text(x + px(13), y, text=text, anchor="w", font=small, fill=pal["text2"])
+        legend_y = px(11)
+        for x, text, color in self._legend_layout(c):
+            if color is None:                           # 다 못 넣은 항목 수
+                c.create_text(x, legend_y, text=text, anchor="w", font=small, fill=pal["muted"])
+                continue
+            c.create_line(x, legend_y, x + px(10), legend_y, fill=color, width=px(2))
+            c.create_text(x + px(13), legend_y, text=text, anchor="w", font=small, fill=pal["text2"])
         for v in (0, 50, 100):
             y = self._y(c, v)
             c.create_line(left, y, right, y, fill=pal["axis"] if v == 0 else pal["grid"])
