@@ -39,6 +39,16 @@ class NotifyTest(unittest.TestCase):
             n.check(Usage("test-jitter", "Test", windows=[Window("weekly", "W", 88, base + jitter)]))
         self.assertEqual(len(sent), 1)
 
+    def test_cycle_tolerance_boundary(self):
+        from agent_usage.notify import CYCLE_TOLERANCE_S, same_cycle
+        base = 1_800_000_000.0
+        self.assertTrue(same_cycle(base, base + CYCLE_TOLERANCE_S - 1))
+        self.assertTrue(same_cycle(base, base - CYCLE_TOLERANCE_S + 1))
+        self.assertFalse(same_cycle(base, base + CYCLE_TOLERANCE_S + 1))
+        self.assertFalse(same_cycle(base, base - CYCLE_TOLERANCE_S - 1))
+        self.assertTrue(same_cycle("no-reset-time", "no-reset-time"))
+        self.assertFalse(same_cycle(None, base))
+
     def test_low_alert_fires_again_in_the_next_cycle(self):
         sent = []
         n = Notifier(settings(), lambda title, msg: sent.append(msg))
