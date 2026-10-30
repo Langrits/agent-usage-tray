@@ -11,7 +11,6 @@ import glob
 import json
 import os
 import pathlib
-import shutil
 import sqlite3
 import threading
 import time
@@ -21,9 +20,6 @@ from .models import Usage
 HOME_DATA_DIR = os.path.join(os.path.expanduser("~"), ".ai-usage-tray")
 DATA_DIR = os.environ.get("AGENT_USAGE_DATA") or HOME_DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
-MERGE_STATE = ".legacy-merge.json"      # 예전 위치별로 마지막으로 합친 시점
-
-
 def _ensure_schema(con: sqlite3.Connection) -> None:
     con.execute("""create table if not exists samples (
         ts real, provider text, window text, label text, used real, resets_at real)""")
@@ -32,6 +28,8 @@ def _ensure_schema(con: sqlite3.Connection) -> None:
     con.execute("""delete from samples where rowid not in (
         select min(rowid) from samples group by provider, window, ts)""")
     con.execute("create unique index if not exists samples_unique on samples(provider, window, ts)")
+    # 예전 위치별로 마지막으로 합칠 때의 수정 시각. 합친 기록과 같은 DB·같은 커밋에 남겨서 어긋나지 않게 한다
+    con.execute("create table if not exists legacy_merge (path text primary key, mtime real)")
 
 
 def legacy_dirs() -> list[str]:
@@ -44,27 +42,26 @@ def legacy_dirs() -> list[str]:
     return [d for d in dict.fromkeys(dirs) if os.path.isdir(d)]
 
 
-def migrate_legacy(target: str, sources: list[str], merged: dict | None = None) -> dict:
+def migrate_legacy(target: str, sources: list[str]) -> None:
     """예전 위치들의 사용 기록을 target으로 합친다 (중복은 한 번만).
 
-    merged: {예전 history.sqlite 경로: 마지막으로 합칠 때의 수정 시각}. 그 뒤로 바뀐 것만 다시 합친다.
-    설정·알림 상태 파일은 target에 없을 때만 가장 최근에 바뀐 것을 복사한다.
-    돌려주는 값은 갱신된 merged.
+    예전 DB마다 마지막으로 합칠 때의 수정 시각을 target DB의 legacy_merge 표에 남기고, 그 시각과
+    다를 때만 다시 합친다(새 기록이 생겼거나 예전 백업으로 되돌린 경우 모두). 기록과 이 표를 한 번에
+    커밋하므로 도중에 꺼져도 둘이 어긋나지 않는다. target DB가 지워지면 표도 함께 사라져 처음부터 합친다.
+    설정·알림 상태 파일은 target에 없을 때만 가장 최근에 바뀐 올바른 사본을 복사한다.
     """
-    merged = dict(merged or {})
     os.makedirs(target, exist_ok=True)
     new_db = os.path.join(target, "history.sqlite")
-    if not os.path.exists(new_db):
-        merged = {}                  # 새 DB를 처음부터 만드는 경우: 예전에 합친 기록도 다시 가져와야 한다
     con = sqlite3.connect(new_db)
     try:
         _ensure_schema(con)
+        merged = dict(con.execute("select path, mtime from legacy_merge").fetchall())
         for src in sources:
             old = os.path.join(src, "history.sqlite")
             if not os.path.exists(old) or os.path.abspath(old) == os.path.abspath(new_db):
                 continue
             mtime = os.path.getmtime(old)
-            if merged.get(old) == mtime:     # 지난번과 똑같으면 건너뛴다 (백업으로 되돌려 시각이 줄어도 다시 합침)
+            if merged.get(old) == mtime:
                 continue
             try:
                 ocon = sqlite3.connect(pathlib.Path(old).as_uri() + "?mode=ro", uri=True)
@@ -73,38 +70,43 @@ def migrate_legacy(target: str, sources: list[str], merged: dict | None = None) 
                 finally:
                     ocon.close()
             except sqlite3.Error:
-                continue
+                continue                     # 이번에 못 읽은 곳은 표에 남기지 않아 다음 시작 때 다시 시도한다
             con.executemany("insert or ignore into samples values (?,?,?,?,?,?)", rows)
-            merged[old] = mtime
+            con.execute("insert or replace into legacy_merge values (?, ?)", (old, mtime))
         con.commit()
     finally:
         con.close()
     for name in ("settings.json", "notify_state.json"):
         dest = os.path.join(target, name)
+        if os.path.exists(dest):
+            continue
         found = [os.path.join(s, name) for s in sources if os.path.exists(os.path.join(s, name))]
-        if found and not os.path.exists(dest):
-            shutil.copy2(max(found, key=os.path.getmtime), dest)
-    return merged
+        for src in sorted(found, key=os.path.getmtime, reverse=True):   # 최근 것부터, 깨진 사본은 건너뛴다
+            if _copy_json_atomic(src, dest):
+                break
+
+
+def _copy_json_atomic(src: str, dest: str) -> bool:
+    """올바른 JSON일 때만 임시 파일에 써서 바꿔치기한다 (중간에 끊겨도 반쪽 파일이 남지 않게)."""
+    try:
+        with open(src, encoding="utf-8") as f:
+            data = json.load(f)
+        tmp = dest + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, dest)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _merge_legacy() -> None:
     if os.environ.get("AGENT_USAGE_DATA"):
         return                       # 위치를 직접 정한 경우(테스트 등)는 건드리지 않는다
-    state_path = os.path.join(DATA_DIR, MERGE_STATE)
     try:
-        with open(state_path, encoding="utf-8") as f:
-            merged = json.load(f)
-    except (OSError, ValueError):
-        merged = {}
-    try:
-        updated = migrate_legacy(DATA_DIR, legacy_dirs(), merged)
-        if updated != merged:
-            tmp = state_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(updated, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, state_path)
+        migrate_legacy(DATA_DIR, legacy_dirs())
     except (OSError, sqlite3.Error):
-        pass                         # 합치기나 상태 저장에 실패해도 앱은 새 위치로 계속 동작한다 (다음 시작 때 다시 시도)
+        pass                         # 합치기에 실패해도 앱은 새 위치로 계속 동작한다 (다음 시작 때 다시 시도)
 
 
 _merge_legacy()

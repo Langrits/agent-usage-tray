@@ -51,12 +51,21 @@ class LegacyMergeTest(unittest.TestCase):
         a = self.make_legacy([shared, (1100.0, "claude", "five_hour", "5h", 12.0, None)], '{"pinned": false}', 1_000)
         b = self.make_legacy([shared, (2000.0, "codex", "weekly", "W", 30.0, None)], '{"pinned": true}', 2_000)
         target = tempfile.mkdtemp()
-        merged = migrate_legacy(target, [a, b])
+        migrate_legacy(target, [a, b])
         self.assertEqual(self.count(target), 3)
         with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f), {"pinned": True})          # 더 최근 것
-        migrate_legacy(target, [a, b], merged)                        # 바뀐 게 없으면 다시 합쳐도 그대로
+        migrate_legacy(target, [a, b])                                # 바뀐 게 없으면 다시 합쳐도 그대로
         self.assertEqual(self.count(target), 3)
+
+    def test_broken_newest_settings_falls_back_to_valid_copy(self):
+        a = self.make_legacy([], '{"pinned": true}', 1_000)
+        b = self.make_legacy([], '{"pinned": tr', 2_000)                # 더 최근이지만 잘린 파일
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a, b])
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})
+        self.assertFalse(os.path.exists(os.path.join(target, "settings.json.tmp")))
 
     def remove_all(self, target):
         import sqlite3
@@ -77,24 +86,24 @@ class LegacyMergeTest(unittest.TestCase):
         a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
         os.utime(os.path.join(a, "history.sqlite"), (5_000, 5_000))
         target = tempfile.mkdtemp()
-        merged = migrate_legacy(target, [a])
+        migrate_legacy(target, [a])
         self.remove_all(target)
-        merged = migrate_legacy(target, [a], merged)
+        migrate_legacy(target, [a])
         self.assertEqual(self.count(target), 0)                       # 바뀌지 않은 원본은 다시 읽지 않는다
         self.add_row(a, (2000.0, "claude", "five_hour", "5h", 20.0, None), 6_000)
-        merged = migrate_legacy(target, [a], merged)
+        migrate_legacy(target, [a])
         self.assertEqual(self.count(target), 2)                       # 바뀐 원본은 전부 다시 합친다
         self.remove_all(target)
         os.utime(os.path.join(a, "history.sqlite"), (4_000, 4_000))   # 예전 백업으로 되돌려 시각이 줄어도
-        migrate_legacy(target, [a], merged)
+        migrate_legacy(target, [a])
         self.assertEqual(self.count(target), 2)
 
     def test_recreated_target_db_merges_everything_again(self):
         a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
         target = tempfile.mkdtemp()
-        merged = migrate_legacy(target, [a])
-        os.remove(os.path.join(target, "history.sqlite"))
-        migrate_legacy(target, [a], merged)
+        migrate_legacy(target, [a])
+        os.remove(os.path.join(target, "history.sqlite"))             # 합친 기록과 '어디까지 합쳤는지'가 함께 사라짐
+        migrate_legacy(target, [a])
         self.assertEqual(self.count(target), 1)
 
     def test_legacy_dirs_include_store_app_copies(self):
