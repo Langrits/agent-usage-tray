@@ -13,7 +13,7 @@ A small Windows tray app that shows how much of your **Claude, Codex, Cursor and
 - Click it for a card per service: remaining bar, time until reset, reset time, reset credits.
 - **Pin** the popup to keep it on screen as a widget (drag it by the title bar).
 - **Alerts** when a limit runs low, when it resets, and when a reset credit arrives.
-- **Usage history** panel next to the popup: a mini chart per service, lined up with its card (24h / 7d / 30d). Toggle it with the chart button.
+- **Usage history** panel next to the popup: a mini chart per service, lined up with its card when the whole popup fits on screen (24h / 7d / 30d). Toggle it with the chart button.
 - Services you are not signed in to are hidden automatically. Korean and English UI.
 
 ![Usage history panel next to the popup](docs/history.png)

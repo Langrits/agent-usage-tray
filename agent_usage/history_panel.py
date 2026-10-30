@@ -67,9 +67,9 @@ class HistoryPanel:
         self.win.bind("<Escape>", lambda e: self.popup.hide())
         # 패널을 눌러도 팝업이 '포커스를 잃었다'며 닫히지 않게 포커스를 이 앱 안에 둔다
         self.win.bind("<ButtonPress>", lambda e: self.win.focus_force(), add="+")
+        # 패널에서 다른 앱으로 넘어가도 팝업과 똑같이 닫히게 (고정하지 않았을 때)
+        self.win.bind("<FocusOut>", lambda e: self.popup.win.after(150, self.popup._check_focus))
         self._build_header()
-        self.body = tk.Frame(self.frame, bg=pal["bg"])
-        self.body.pack(fill="both", expand=True)
 
     def show(self) -> None:
         if not self.win:
@@ -102,16 +102,19 @@ class HistoryPanel:
         self._layout_sections(h0)
 
     def _layout_sections(self, height: int) -> None:
+        self.frame.update_idletasks()
         cards = self.popup.card_frames()
-        top_y = self.px(40)
+        top_y = self.head.winfo_y() + self.head.winfo_height() + self.px(4)   # 패널 머리글 아래
         aligned = cards and not self.popup.scrolling and all(pid in cards for pid in self.sections)
         if aligned:
-            base = self.popup.win.winfo_rooty()
+            # 화면 좌표로 맞춘다: 카드의 화면 위치 - 이 패널 프레임의 화면 위치 (두 창은 같은 높이에 붙어 있다)
+            base = self.frame.winfo_rooty()
             for pid, canvas in self.sections.items():
                 card = cards[pid]
-                y = card.winfo_rooty() - base - 1
-                canvas.place(x=self.px(10), y=y, relwidth=1, width=-self.px(20), height=card.winfo_height())
-        else:                                            # 팝업이 스크롤 중이면 단순히 위에서부터 나눈다
+                y = card.winfo_rooty() - base
+                canvas.place(x=self.px(10), y=max(y, top_y), relwidth=1, width=-self.px(20),
+                             height=card.winfo_height() - max(0, top_y - y))
+        else:      # 팝업이 화면보다 길어 스크롤될 때는 카드에 맞추지 않고 머리글 아래를 고르게 나눈다
             n = max(1, len(self.sections))
             each = max(self.px(90), (height - top_y - self.px(8)) // n)
             for i, canvas in enumerate(self.sections.values()):
@@ -125,7 +128,8 @@ class HistoryPanel:
     def _build_header(self) -> None:
         pal, px = self.pal, self.px
         head = tk.Frame(self.frame, bg=pal["bg"])
-        head.pack(fill="x", padx=(px(14), px(10)), pady=(px(10), px(2)))
+        head.pack(fill="x", padx=(px(14), px(10)), pady=(px(8), px(2)))    # 팝업 머리글과 같은 높이
+        self.head = head
         tk.Label(head, text=t("h_title"), font=(theme.FONT, 11, "bold"), fg=pal["text"],
                  bg=pal["bg"]).pack(side="left")
         tk.Label(head, text=t("h_used"), font=(theme.FONT, 8), fg=pal["muted"],
@@ -162,7 +166,7 @@ class HistoryPanel:
                 canvas.destroy()
             self.sections = {}
             for pid in wanted:
-                c = tk.Canvas(self.body, bg=self.pal["card"], highlightthickness=1,
+                c = tk.Canvas(self.frame, bg=self.pal["card"], highlightthickness=1,
                               highlightbackground=self.pal["border"])
                 c.pid = pid
                 c.bind("<Configure>", lambda e, c=c: self._draw(c))
@@ -173,17 +177,22 @@ class HistoryPanel:
 
     def _geometry(self, c: tk.Canvas):
         w, h = c.winfo_width(), c.winfo_height()
-        top = self.px(14) + self._legend_rows(c) * self.px(14)
+        rows = max([row for *_, row in self._legend_layout(c)] or [0]) + 1
+        top = self.px(14) + rows * self.px(14)                         # 실제 범례 줄 수만큼 비운다
         return self.px(30), top, w - self.px(10), h - self.px(18)      # 왼, 위, 오른, 아래
 
-    def _legend_items(self, c: tk.Canvas) -> list[tuple[str, str, float]]:
-        out = []
+    def _legend_layout(self, c: tk.Canvas) -> list[tuple[int, str, str, int]]:
+        """범례 배치 [(x, 글자, 색, 줄)]: 제목 오른쪽부터, 넘치면 다음 줄로."""
+        px, out = self.px, []
+        x, row = px(70), 0
         for window, pts in self.data.get(c.pid, {}).items():
-            out.append((pts[-1][2], theme.series_color(self.pal, c.pid, window), pts[-1][1]))
+            text = f"{pts[-1][2]} {pts[-1][1]:.0f}%"
+            width = len(text) * px(6) + px(16)
+            if x + width > c.winfo_width() - px(6) and x > px(8) and (row > 0 or x > px(70)):
+                x, row = px(8), row + 1
+            out.append((x, text, theme.series_color(self.pal, c.pid, window), row))
+            x += width
         return out
-
-    def _legend_rows(self, c: tk.Canvas) -> int:
-        return 2 if len(self._legend_items(c)) > 2 else 1
 
     def _x(self, c: tk.Canvas, ts: float) -> float:
         left, _, right, _ = self._geometry(c)
@@ -204,17 +213,10 @@ class HistoryPanel:
         mod = BY_ID.get(c.pid)
         c.create_text(px(8), px(4), text=mod.TITLE if mod else c.pid, anchor="nw",
                       font=(theme.FONT, 9, "bold"), fill=pal["text"])
-        # 범례: 제목 오른쪽부터, 많으면 둘째 줄로
-        x, row = px(70), 0
-        for label, color, last in self._legend_items(c):
-            text = f"{label} {last:.0f}%"
-            width = len(text) * px(6) + px(16)
-            if x + width > c.winfo_width() - px(6) and x > px(70):
-                x, row = px(8), row + 1
+        for x, text, color, row in self._legend_layout(c):
             y = px(10) + row * px(14)
             c.create_line(x, y, x + px(10), y, fill=color, width=px(2))
             c.create_text(x + px(13), y, text=text, anchor="w", font=small, fill=pal["text2"])
-            x += width
         for v in (0, 50, 100):
             y = self._y(c, v)
             c.create_line(left, y, right, y, fill=pal["axis"] if v == 0 else pal["grid"])
