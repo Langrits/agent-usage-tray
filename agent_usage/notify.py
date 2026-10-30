@@ -8,6 +8,16 @@ from .i18n import t
 from .models import Usage
 from .store import JsonFile
 
+# 서비스가 알려 주는 초기화 시각은 조회할 때마다 조금씩 흔들린다(Claude는 1초 안쪽).
+# 이 정도 차이는 같은 한도 주기로 봐야 같은 부족 알림이 반복되지 않는다.
+CYCLE_TOLERANCE_S = 600
+
+
+def same_cycle(a, b) -> bool:
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) < CYCLE_TOLERANCE_S
+    return a == b
+
 
 class Notifier:
     def __init__(self, settings: JsonFile, send):
@@ -39,7 +49,7 @@ class Notifier:
             # 이번 한도 주기의 표식. 초기화 시각이 없는 한도도 한 번은 알리도록 별도 값을 쓴다
             cycle = w.resets_at if w.resets_at is not None else "no-reset-time"
             if self.settings["notify_low"] and remaining <= threshold:
-                if low_cycle != cycle:
+                if not same_cycle(low_cycle, cycle):
                     when = countdown(w.resets_at)
                     self.send(t("n_low_title"), t("n_low", name=name, r=f"{remaining:.0f}")
                               + (t("n_low_when", when=when) if when else ""))

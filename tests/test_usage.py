@@ -30,6 +30,23 @@ class NotifyTest(unittest.TestCase):
         n.check(u)
         self.assertEqual(len(sent), 1)
 
+    def test_low_alert_ignores_jittering_reset_time(self):
+        # Claude는 조회마다 초기화 시각이 1초 안쪽으로 흔들린다: 10:00:00.960 → 10:00:01.001 ...
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(msg))
+        base = time.time() + 2 * 86400
+        for jitter in (-0.04, 0.0, 0.013, 1.004, -0.02):
+            n.check(Usage("test-jitter", "Test", windows=[Window("weekly", "W", 88, base + jitter)]))
+        self.assertEqual(len(sent), 1)
+
+    def test_low_alert_fires_again_in_the_next_cycle(self):
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(msg))
+        base = time.time() + 3600
+        n.check(Usage("test-cycle", "Test", windows=[Window("weekly", "W", 90, base)]))
+        n.check(Usage("test-cycle", "Test", windows=[Window("weekly", "W", 91, base + 7 * 86400)]))
+        self.assertEqual(len(sent), 2)
+
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
