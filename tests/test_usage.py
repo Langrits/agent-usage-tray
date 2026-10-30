@@ -30,6 +30,50 @@ class NotifyTest(unittest.TestCase):
         n.check(u)
         self.assertEqual(len(sent), 1)
 
+    def test_low_alert_ignores_jittering_reset_time(self):
+        # Claude는 조회마다 초기화 시각이 1초 안쪽으로 흔들린다: 10:00:00.960 → 10:00:01.001 ...
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(msg))
+        base = time.time() + 2 * 86400
+        for jitter in (-0.04, 0.0, 0.013, 1.004, -0.02):
+            n.check(Usage("test-jitter", "Test", windows=[Window("weekly", "W", 88, base + jitter)]))
+        self.assertEqual(len(sent), 1)
+
+    def test_cycle_tolerance_boundary(self):
+        from agent_usage.notify import CYCLE_TOLERANCE_S, same_cycle
+        base = 1_800_000_000.0
+        self.assertTrue(same_cycle(base, base + CYCLE_TOLERANCE_S - 1))
+        self.assertTrue(same_cycle(base, base - CYCLE_TOLERANCE_S + 1))
+        self.assertFalse(same_cycle(base, base + CYCLE_TOLERANCE_S + 1))
+        self.assertFalse(same_cycle(base, base - CYCLE_TOLERANCE_S - 1))
+        self.assertFalse(same_cycle(base, base + CYCLE_TOLERANCE_S))      # 정확히 10분부터 다른 주기
+        self.assertFalse(same_cycle(base, base - CYCLE_TOLERANCE_S))
+        self.assertTrue(same_cycle("no-reset-time", "no-reset-time"))
+        self.assertFalse(same_cycle(None, base))
+
+    def test_low_alert_fires_again_in_the_next_cycle(self):
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(msg))
+        base = time.time() + 3600
+        n.check(Usage("test-cycle", "Test", windows=[Window("weekly", "W", 90, base)]))
+        n.check(Usage("test-cycle", "Test", windows=[Window("weekly", "W", 91, base + 7 * 86400)]))
+        self.assertEqual(len(sent), 2)
+
+    def low_alerts(self, provider, used_values, resets_at):
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(title))
+        for used in used_values:
+            n.check(Usage(provider, "Test", windows=[Window("weekly", "W", used, resets_at)]))
+        return sent.count(i18n.t("n_low_title"))
+
+    def test_low_alert_ignores_wobble_around_the_threshold(self):
+        # 문턱 20%: 남은 양 19% → 21% → 19% (같은 주기)
+        self.assertEqual(self.low_alerts("test-wobble", [81, 79, 81], time.time() + 86400), 1)
+
+    def test_low_alert_fires_again_after_a_real_recovery(self):
+        # 같은 주기라도 재설정권 등으로 40%까지 회복했다가 다시 19%가 되면 다시 알린다
+        self.assertEqual(self.low_alerts("test-refill", [81, 60, 81], time.time() + 86400), 2)
+
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
