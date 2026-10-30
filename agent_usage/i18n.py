@@ -61,11 +61,9 @@ KO = {
     "n_low_title": "사용량 부족", "n_low": "{name} {r}% 남음", "n_low_when": " · 초기화 {when}",
     "n_rc_title": "재설정권", "n_rc": "{title} 재설정권이 생겼어요 · {n}개 보유",
     "n_many": "AI 사용량 알림 {n}건",
-    # 그래프
-    "g_title": "AI 사용량 기록", "g_heading": "사용한 비율 (%)", "g_sub": "초기화되면 아래로 떨어져요",
-    "g_24h": "24시간", "g_7d": "7일", "g_30d": "30일", "g_table": "표로 보기",
-    "g_empty": "아직 기록이 없어요. 몇 번 조회되면 그래프가 그려져요.",
-    "g_col_time": "시각", "g_col_item": "항목", "g_col_used": "사용한 비율", "g_hour": "{h}시",
+    # 사용 기록 패널
+    "h_title": "사용 기록", "h_used": "사용한 비율", "h_empty": "아직 기록이 없어요",
+    "g_24h": "24시간", "g_7d": "7일", "g_30d": "30일", "g_hour": "{h}시",
     # 설정
     "s_title": "설정", "s_services": "서비스", "s_alerts": "알림", "s_general": "일반",
     "s_mode_auto": "자동", "s_mode_show": "항상 표시", "s_mode_hide": "숨기기",
@@ -132,10 +130,8 @@ EN = {
     "n_low_title": "Running low", "n_low": "{name}: {r}% left", "n_low_when": " · resets {when}",
     "n_rc_title": "Reset credit", "n_rc": "{title}: new reset credit · {n} available",
     "n_many": "AI Usage: {n} alerts",
-    "g_title": "AI Usage History", "g_heading": "Used (%)", "g_sub": "drops when a limit resets",
-    "g_24h": "24h", "g_7d": "7d", "g_30d": "30d", "g_table": "Table",
-    "g_empty": "No history yet. The chart appears after a few refreshes.",
-    "g_col_time": "Time", "g_col_item": "Item", "g_col_used": "Used", "g_hour": "{h}:00",
+    "h_title": "Usage history", "h_used": "used %", "h_empty": "No history yet",
+    "g_24h": "24h", "g_7d": "7d", "g_30d": "30d", "g_hour": "{h}:00",
     "s_title": "Settings", "s_services": "Services", "s_alerts": "Alerts", "s_general": "General",
     "s_mode_auto": "Auto", "s_mode_show": "Always show", "s_mode_hide": "Hide",
     "s_mode_help": "Auto: show only when this PC has a login for it",

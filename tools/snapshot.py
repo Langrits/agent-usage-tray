@@ -102,14 +102,26 @@ def check_rerender():
     app.popup.render()                      # 20초 갱신과 같은 경로
     print("rebuilt on re-render:", app.popup.body is not body)
     grab(app.popup.win, f"popup{suffix}.png")
-    app.open_graph()
-    app.root.after(1200, shot_graph)
+    if not app.settings["history_open"]:
+        app.popup.toggle_history()
+    app.root.after(1200, shot_history)
 
 
-def shot_graph():
-    c = app.graph.canvas
-    c.event_generate("<Motion>", x=int(c.winfo_width() * 0.62), y=int(c.winfo_height() * 0.5))
-    grab(app.graph.win, f"graph{suffix}.png")
+def shot_history():
+    """팝업 옆 사용 기록 패널: 두 창을 한 장으로 (첫 구역 그래프에 마우스를 올린 상태)."""
+    panel = app.popup.history
+    first = next(iter(panel.sections.values()), None)
+    if first is not None:
+        first.event_generate("<Motion>", x=int(first.winfo_width() * 0.7), y=int(first.winfo_height() * 0.5))
+    wins = [panel.win, app.popup.win]
+    for w in wins:
+        w.update()
+    x0 = min(w.winfo_rootx() for w in wins)
+    y0 = min(w.winfo_rooty() for w in wins)
+    x1 = max(w.winfo_rootx() + w.winfo_width() for w in wins)
+    y1 = max(w.winfo_rooty() + w.winfo_height() for w in wins)
+    ImageGrab.grab(bbox=(x0, y0, x1, y1), all_screens=True).save(os.path.join(out_dir, f"history{suffix}.png"))
+    print("saved", f"history{suffix}.png", x1 - x0, y1 - y0)
     app.open_settings()
     app.root.after(800, shot_settings)
 
