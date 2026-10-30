@@ -47,8 +47,9 @@ def mtime(path: str) -> float:
 class JsonlCache:
     """경로별로 요약 객체를 기억해 두고, 파일 끝에 새로 붙은 줄만 요약에 더한다.
 
-    요약 객체는 feed(record: dict) 메서드를 가진다. 파일이 줄었거나 앞부분이 바뀌었으면(새로 쓰임)
-    처음부터 다시 읽는다. prune()은 이번 수집에서 쓰지 않은 파일을 캐시에서 지운다.
+    요약 객체는 feed(record: dict) 메서드를 가진다. 파일이 새로 쓰였으면(줄었거나, 새로 만들어졌거나,
+    앞부분이나 지난번 읽은 끝 바로 앞이 바뀜) 처음부터 다시 읽는다. 기록 파일은 덧붙이기만 하므로 이 정도면 충분하다.
+    prune()은 이번 수집에서 쓰지 않은 파일을 캐시에서 지운다.
 
     지금 상태만 알면 되는 큰 기록은 get(..., first=앞 바이트, last=끝 바이트)로 처음 읽을 때 앞·끝만 읽는다.
     건너뛴 부분이 있으면 요약 객체의 gap()을 (있으면) 불러 그 사이를 모른다는 것을 알린다.
@@ -56,19 +57,21 @@ class JsonlCache:
 
     def __init__(self):
         self._lock = threading.Lock()
-        # path -> (읽은 바이트, 앞부분, 읽은 끝 바로 앞 바이트, 요약)
-        self._items: dict[str, tuple[int, bytes, bytes, object]] = {}
+        # path -> (읽은 바이트, 앞부분, 읽은 끝 바로 앞 바이트, 만든 시각, 요약)
+        self._items: dict[str, tuple[int, bytes, bytes, float | None, object]] = {}
         self._used: set[str] = set()
 
     def get(self, path: str, factory, first: int = 0, last: int = 0):
         with self._lock:
             self._used.add(path)
-            offset, head, mark, summary = self._items.get(path, (0, b"", b"", None))
+            offset, head, mark, born, summary = self._items.get(path, (0, b"", b"", None, None))
             try:
-                size = os.path.getsize(lp(path))
+                st = os.stat(lp(path))
+                size, birth = st.st_size, getattr(st, "st_birthtime", None)
                 with open(lp(path), "rb") as f:
                     current_head = f.read(HEAD_BYTES)
-                    changed = summary is None or size < offset or current_head[:len(head)] != head
+                    changed = (summary is None or size < offset or birth != born
+                               or current_head[:len(head)] != head)
                     if not changed and mark:          # 앞부분이 같게 다시 쓴 파일: 지난번 읽은 끝도 그대로인지 본다
                         f.seek(offset - len(mark))
                         changed = f.read(len(mark)) != mark
@@ -92,7 +95,7 @@ class JsonlCache:
                     mark = b""
             except OSError:
                 return None
-            self._items[path] = (offset, current_head, mark, summary)
+            self._items[path] = (offset, current_head, mark, birth, summary)
             return summary
 
     def prune(self) -> None:

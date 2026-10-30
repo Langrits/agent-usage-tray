@@ -18,6 +18,7 @@ TAIL_BYTES = 1 << 20      # 끝(지금 상태)만 읽는다
 # 승인 요청 뒤 이 이벤트가 오면 작업이 다시 진행 중인 것
 PROGRESS = {"item_completed", "agent_message", "exec_command_begin", "exec_command_end",
             "function_call_output", "custom_tool_call_output", "patch_apply_begin", "patch_apply_end"}
+STARTS = {"exec_command_begin", "patch_apply_begin"}     # 승인받은 명령이 실제로 시작될 때
 
 
 class CodexLog:
@@ -36,6 +37,8 @@ class CodexLog:
     def state(self) -> str | None:
         if self.turn_open:
             return WAITING if self.waiting else RUNNING
+        if self.turn_open is None:               # 턴이 끝났는지 모르면 한도로 멈췄다고도 하지 않는다
+            return None
         return LIMITED if self.limit_reached else None
 
     @property
@@ -79,7 +82,8 @@ class CodexLog:
                 self.turn_open = True
             # 그 승인 요청의 명령이 실행되면 대기가 끝난다. 다른 명령의 진행으로는 끝나지 않는다
             self.waiting.discard(payload.get("call_id"))
-            self.waiting.discard("?")
+            if kind in STARTS:                   # ID 없는 승인 요청은 맞춰 볼 수 없어 명령이 시작될 때 끝난 것으로 본다
+                self.waiting.discard("?")
         elif kind == "token_count":
             limits = payload.get("rate_limits")
             if isinstance(limits, dict):         # 한도 정보가 빠진 기록은 이전 상태를 그대로 둔다

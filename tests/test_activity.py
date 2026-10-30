@@ -171,6 +171,24 @@ class CodexStateTest(unittest.TestCase):
         log.feed(self.event(now - 60, "exec_command_begin", call_id="a"))
         self.assertEqual(log.state, RUNNING)
 
+    def test_limit_after_a_gap_needs_the_turn_to_end(self):
+        now = time.time()
+        log = feed(CodexLog(), self.meta(now - 100))
+        log.gap()
+        log.feed(self.event(now - 20, "token_count", rate_limits={"rate_limit_reached_type": "primary"}))
+        self.assertIsNone(log.state)                      # 턴이 끝났는지 모른다
+        log.feed(self.event(now - 10, "task_complete"))
+        self.assertEqual(log.state, LIMITED)
+
+    def test_approval_without_id_ends_when_a_command_starts(self):
+        now = time.time()
+        log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"),
+                   self.event(now - 80, "exec_approval_request"),
+                   self.event(now - 70, "agent_message", message="waiting"))
+        self.assertEqual(log.state, WAITING)
+        log.feed(self.event(now - 60, "exec_command_begin"))
+        self.assertEqual(log.state, RUNNING)
+
     def test_usage_record_without_limits_keeps_the_limit(self):
         now = time.time()
         log = feed(CodexLog(), self.meta(now - 100), self.event(now - 90, "task_started"),
@@ -309,9 +327,10 @@ class JsonlCacheTest(unittest.TestCase):
 
     def test_rewrite_with_the_same_start_and_size_is_read_again(self):
         cache = JsonlCache()
-        self.write('{"i": 1}' + NL + '{"i": 2}' + NL)
+        first = json.dumps({"i": 1, "pad": "x" * 300}) + NL                # 비교하는 앞부분(256바이트)보다 긴 첫 줄
+        self.write(first + '{"i": 2}' + NL)
         cache.get(self.path, Counter)
-        self.write('{"i": 1}' + NL + '{"i": 5}' + NL)                       # 앞부분·크기가 같고 내용만 다름
+        self.write(first + '{"i": 5}' + NL)                                 # 앞부분·크기가 같고 끝만 다름
         self.assertEqual(cache.get(self.path, Counter).ids, [1, 5])
 
     def test_prune_drops_unused_files(self):

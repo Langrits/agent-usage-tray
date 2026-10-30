@@ -168,8 +168,10 @@ class ActivityPanel:
                 refs["note"].configure(text=elide(note, width, self.sub_font.measure))
                 if note:
                     refs["note"].grid()
-                else:
+                    refs["sub"].grid_configure(pady=0)
+                else:                       # 셋째 줄이 없으면 둘째 줄 아래에 카드 여백을 둔다
                     refs["note"].grid_remove()
+                    refs["sub"].grid_configure(pady=(0, self.px(6)))
         self.count.configure(text=t("a_count", n=len(items)) if items else "")
         self.follow()
 
