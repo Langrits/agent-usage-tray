@@ -16,9 +16,56 @@ from agent_usage import i18n, winutil  # noqa: E402
 from agent_usage.models import Usage, Window  # noqa: E402
 from agent_usage.notify import Notifier  # noqa: E402
 from agent_usage.providers import BY_ID, Options, claude, codex, cursor, fetch_one, gemini  # noqa: E402
-from agent_usage.store import History, settings  # noqa: E402
+from agent_usage.store import History, legacy_dirs, migrate_legacy, settings  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class LegacyMergeTest(unittest.TestCase):
+    """0.1.x가 두 곳(AppData 원래 위치, 스토어 앱 전용 사본)에 나눠 남긴 기록을 새 위치로 합친다."""
+
+    def make_legacy(self, rows, settings_text, mtime):
+        import sqlite3
+        d = tempfile.mkdtemp()
+        con = sqlite3.connect(os.path.join(d, "history.sqlite"))
+        con.execute("create table samples (ts real, provider text, window text, label text, used real, resets_at real)")
+        con.executemany("insert into samples values (?,?,?,?,?,?)", rows)
+        con.commit()
+        con.close()
+        path = os.path.join(d, "settings.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(settings_text)
+        os.utime(path, (mtime, mtime))
+        return d
+
+    def count(self, target):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(target, "history.sqlite"))
+        try:
+            return con.execute("select count(*) from samples").fetchone()[0]
+        finally:
+            con.close()
+
+    def test_merges_both_without_duplicates_and_takes_newest_settings(self):
+        shared = (1000.0, "claude", "five_hour", "5h", 10.0, None)
+        a = self.make_legacy([shared, (1100.0, "claude", "five_hour", "5h", 12.0, None)], '{"pinned": false}', 1_000)
+        b = self.make_legacy([shared, (2000.0, "codex", "weekly", "W", 30.0, None)], '{"pinned": true}', 2_000)
+        target = tempfile.mkdtemp()
+        merged = migrate_legacy(target, [a, b])
+        self.assertEqual(self.count(target), 3)
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})          # 더 최근 것
+        migrate_legacy(target, [a, b], merged)                        # 바뀐 게 없으면 다시 합쳐도 그대로
+        self.assertEqual(self.count(target), 3)
+
+    def test_legacy_dirs_include_store_app_copies(self):
+        local = tempfile.mkdtemp()
+        real = os.path.join(local, "AgentUsage")
+        boxed = os.path.join(local, "Packages", "Claude_x", "LocalCache", "Local", "AgentUsage")
+        os.makedirs(real)
+        os.makedirs(boxed)
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": local}):
+            self.assertEqual(legacy_dirs(), [real, boxed])
 
 
 class NotifyTest(unittest.TestCase):
