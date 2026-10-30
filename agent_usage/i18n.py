@@ -55,6 +55,7 @@ KO = {
     # 트레이
     "menu_toggle": "열기 / 닫기", "menu_refresh": "지금 새로고침", "menu_pin": "화면에 고정",
     "menu_history": "사용 기록 그래프", "menu_settings": "설정…", "menu_quit": "종료",
+    "menu_activity": "작업 현황",
     "tooltip": "남은 양 · {parts}", "tooltip_attention": "{title} 확인 필요",
     # 알림
     "n_reset_title": "한도 초기화", "n_reset": "{name} 한도가 초기화됐어요 · 지금 {r}% 남음",
@@ -64,6 +65,12 @@ KO = {
     # 사용 기록 패널
     "h_title": "사용 기록", "h_used": "사용한 비율", "h_empty": "아직 기록이 없어요",
     "g_24h": "24시간", "g_7d": "7일", "g_30d": "30일", "g_hour": "{h}시",
+    # 작업 현황 패널 (진행 중인 작업만)
+    "a_title": "작업 현황", "a_count": "{n}개", "a_none": "진행 중인 작업이 없어요", "a_loading": "확인하는 중…",
+    "a_more": "그 밖에 {n}개", "a_error": "{names} 기록을 읽지 못했어요",
+    "a_running": "작업 중", "a_waiting": "권한·답변 대기", "a_limited": "한도 초과로 중단", "a_stalled": "{d}째 기록 없음",
+    "a_resets": "{clock} 초기화", "a_reset_done": "한도 초기화됨",
+    "dur_m": "{m}분", "dur_h": "{h}시간", "dur_hm": "{h}시간 {m}분",
     # 설정
     "s_title": "설정", "s_services": "서비스", "s_alerts": "알림", "s_general": "일반",
     "s_mode_auto": "자동", "s_mode_show": "항상 표시", "s_mode_hide": "숨기기",
@@ -125,6 +132,7 @@ EN = {
     "err_format": "No usage numbers in the response (the service may have changed)",
     "menu_toggle": "Open / Close", "menu_refresh": "Refresh now", "menu_pin": "Pin to screen",
     "menu_history": "Usage history", "menu_settings": "Settings…", "menu_quit": "Quit",
+    "menu_activity": "Agent activity",
     "tooltip": "Left · {parts}", "tooltip_attention": "{title} needs attention",
     "n_reset_title": "Limit reset", "n_reset": "{name} has reset · {r}% left",
     "n_low_title": "Running low", "n_low": "{name}: {r}% left", "n_low_when": " · resets {when}",
@@ -132,6 +140,12 @@ EN = {
     "n_many": "AI Usage: {n} alerts",
     "h_title": "Usage history", "h_used": "used %", "h_empty": "No history yet",
     "g_24h": "24h", "g_7d": "7d", "g_30d": "30d", "g_hour": "{h}:00",
+    "a_title": "Agent activity", "a_count": "{n} active", "a_none": "Nothing in progress", "a_loading": "Checking…",
+    "a_more": "{n} more", "a_error": "Couldn't read {names} logs",
+    "a_running": "Running", "a_waiting": "Waiting for you", "a_limited": "Stopped by usage limit",
+    "a_stalled": "No activity for {d}",
+    "a_resets": "resets {clock}", "a_reset_done": "limit has reset",
+    "dur_m": "{m}m", "dur_h": "{h}h", "dur_hm": "{h}h {m}m",
     "s_title": "Settings", "s_services": "Services", "s_alerts": "Alerts", "s_general": "General",
     "s_mode_auto": "Auto", "s_mode_show": "Always show", "s_mode_hide": "Hide",
     "s_mode_help": "Auto: show only when this PC has a login for it",

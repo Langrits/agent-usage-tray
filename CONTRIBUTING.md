@@ -15,6 +15,8 @@ agent_usage/
   app.py                    tray icon + popup (updates values in place, no flicker)
   settings_window.py        settings UI
   history_panel.py          usage history panel docked next to the popup (mini chart per service)
+  activity_panel.py         agent activity panel docked outside it (work in progress only)
+  activity/                 reads agent logs: one module per app (claude.py codex.py cursor.py)
   notify.py                 low / reset / reset-credit alerts
   i18n.py                   Korean and English strings
   store.py                  settings.json, history.sqlite

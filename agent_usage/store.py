@@ -127,6 +127,7 @@ DEFAULTS = {
     "pin_pos": None,            # [x, y]
     "history_range_hours": 24,  # 사용 기록 패널 기간
     "history_open": False,      # 팝업 옆 사용 기록 패널을 켜 두었는지
+    "activity_open": False,     # 팝업 옆 작업 현황 패널을 켜 두었는지
 }
 
 

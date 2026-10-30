@@ -14,6 +14,7 @@ A small Windows tray app that shows how much of your **Claude, Codex, Cursor and
 - **Pin** the popup to keep it on screen as a widget (drag it by the title bar).
 - **Alerts** when a limit runs low, when it resets, and when a reset credit arrives.
 - **Usage history** panel next to the popup: a mini chart per service, lined up with its card when the whole popup fits on screen (24h / 7d / 30d). Toggle it with the chart button.
+- **Agent activity** panel: only the Claude / Codex / Cursor work in progress right now (waiting for you / stopped by a usage limit / running / gone quiet). Toggle it with the list button.
 - Services you are not signed in to are hidden automatically. Korean and English UI.
 
 ![Usage history panel next to the popup](docs/history.png)
@@ -55,6 +56,18 @@ The app only reads sign-ins that already exist on your PC. Sign in once with eac
 
 Then click **Refresh now** in the tray menu.
 
+## Agent activity
+
+Toggle it with the list button in the popup header or **Agent activity** in the tray menu. The number next to the button is how many items are in progress (yellow when one is waiting for you). The panel docks left of the popup, outside the usage history panel when that is open.
+
+![Agent activity panel](docs/activity.png)
+
+- **Only work in progress** is listed. Finished work drops off.
+- **Status**: waiting for you (a question or an approval) · stopped by usage limit (with when that service's limit resets, or *limit has reset*) · running (how long since the request started) · *no activity for N min* (running, but nothing logged for over 10 minutes. It does not claim the work is stuck, it only shows how long the log has been quiet, and drops off after 2 hours).
+- **Only what the apps log themselves** is used: request start and end, question and approval waits, and usage-limit hits from Claude Code and Codex, and the generating state and approval or plan waits of Cursor editor chats. Work without such records (for example the Cursor agent CLI) is not guessed and not shown. When the start time is not in the log, no duration is shown.
+- Click a row to open a Claude desktop conversation in the app, or a Cursor chat's project in Cursor. Codex has no link to a conversation, so its rows are not clickable.
+- While the popup is open it re-reads the logs every 15 seconds.
+
 ## Settings
 
 Open **Settings…** from the tray menu or the ⚙ button in the popup.
@@ -85,6 +98,7 @@ There are no official usage APIs for these plans, so this app calls **the same i
 | Gemini | `~/.gemini/oauth_creds.json` | `cloudcode-pa.googleapis.com`, `oauth2.googleapis.com` (token renewal) |
 
 - Tokens never leave your PC except to the service that issued them. Nothing is sent anywhere else, and there is no telemetry.
+- **Agent activity** only reads log files on this PC (`~/.claude/projects`, `%APPDATA%\Claude\claude-code-sessions`, `~/.codex/sessions`, Cursor's `state.vscdb`). It makes no network requests and never changes those files. Large logs are read only at the start and end. Rows show the conversation title, or the first part of a request (up to 60 characters) when there is none.
 - With **Renew logins automatically** on, when a Claude or Gemini token has expired the app renews it the same way the CLI does and **writes the new token back to that CLI's login file**, so the CLI keeps working. Turn it off if you don't want the app to modify those files; the card will then ask you to run the CLI once.
 - For Gemini renewal, the app looks up Gemini CLI's public OAuth client values in your installed Gemini CLI rather than shipping them.
 

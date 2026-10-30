@@ -105,6 +105,7 @@ class HistoryPanel:
         self.sections: dict[str, tk.Canvas] = {}
         self.data: dict[str, dict[str, list]] = {}
         self.now = time.time()
+        self.placed: tuple[int, int] | None = None     # 마지막으로 놓은 (x, 폭): 작업 현황 패널이 그 바깥쪽에 붙는다
 
     @property
     def hours(self) -> int:
@@ -156,6 +157,7 @@ class HistoryPanel:
         w = self.px(WIDTH)
         x = panel_x(x0, w0, w, self.px(GAP), left, right)
         self.win.geometry(f"{w}x{h0}+{x}+{y0}")
+        self.placed = (x, w)
         self._layout_sections(h0)
 
     def _layout_sections(self, height: int) -> None:
