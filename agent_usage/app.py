@@ -317,11 +317,17 @@ class Popup:
         on = not self.app.settings["history_open"]
         self.app.settings["history_open"] = on
         self.app.icon.update_menu()
-        self.render_if_visible()               # 그래프 버튼 강조 상태
+        self._style_toggles()
         if on and self.visible:
             self.history.show()
         else:
             self.history.hide()
+
+    def _style_toggles(self) -> None:
+        """패널 버튼 강조만 바꾼다 (팝업 전체를 다시 만들면 깜빡인다)."""
+        b = self.refs.get("btn_history")
+        if b:
+            b.configure(fg=self.app.pal["text"] if self.app.settings["history_open"] else self.app.pal["text2"])
 
     def rebuild_history_panel(self) -> None:
         """언어를 바꾸면 패널 머리글 글자도 바뀌어야 해서 새로 만든다."""
@@ -490,7 +496,7 @@ class Popup:
         return {"cards": cards, "footer": footer}
 
     def _signature(self, m: dict):
-        return (self.pinned, bool(self.app.settings["history_open"]), i18n.lang(), tuple(
+        return (self.pinned, i18n.lang(), tuple(
             (c["id"], c["loading"], bool(c["plan"]), bool(c["meta"]),
              tuple((r["key"], bool(r["note"]), bool(r["when"])) for r in c["rows"]),
              c["reset"][1] if c["reset"] else None, len(c["extras"]), c["problem"] is not None, bool(c["hint"]))
@@ -555,7 +561,10 @@ class Popup:
                                    (GLYPH["settings"], self.app.open_settings, False),
                                    (GLYPH["chart"], self.toggle_history, bool(self.app.settings["history_open"])),
                                    (GLYPH["refresh"], self.app.refresh, False)):
-            self._icon_button(head, glyph, cmd, active).pack(side="right")
+            b = self._icon_button(head, glyph, cmd, active)
+            b.pack(side="right")
+            if cmd == self.toggle_history:
+                self.refs["btn_history"] = b
         for w in (head, title):
             w.bind("<ButtonPress-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
