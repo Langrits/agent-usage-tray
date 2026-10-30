@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from . import APP_NAME, __version__, i18n, theme, winutil
 from . import format as fmt
-from .graph import HistoryWindow
+from .history_panel import HistoryPanel
 from .i18n import t
 from .models import Usage
 from .notify import Notifier
@@ -72,7 +72,6 @@ class App:
         self.scale = self.root.winfo_fpixels("1i") / 96
         self.pal = theme.palette()
         self.popup = Popup(self)
-        self.graph: HistoryWindow | None = None
         self.settings_win: SettingsWindow | None = None
         self.icon = pystray.Icon("AgentUsage", tray_image("…", theme.STATUS["none"]), APP_NAME,
                                  menu=self._menu())
@@ -103,9 +102,7 @@ class App:
         elif key == "language":
             i18n.set_language(value)
             self.icon.update_menu()
-            if self.graph and self.graph.alive():
-                self.graph.win.destroy()
-                self.graph = HistoryWindow(self)
+            self.popup.rebuild_history_panel()
             self.refresh()          # 한도 이름 등은 조회할 때 만들어지므로 새로 조회
         elif key == "refresh_minutes":
             if not self.fetching:
@@ -124,7 +121,8 @@ class App:
             item(lambda _: t("menu_toggle"), lambda: self.post("toggle"), default=True),
             item(lambda _: t("menu_refresh"), lambda: self.post("refresh")),
             item(lambda _: t("menu_pin"), lambda: self.post("pin"), checked=lambda _: bool(self.settings["pinned"])),
-            item(lambda _: t("menu_history"), lambda: self.post("graph")),
+            item(lambda _: t("menu_history"), lambda: self.post("history"),
+                 checked=lambda _: bool(self.settings["history_open"])),
             item(lambda _: t("menu_settings"), lambda: self.post("settings")),
             pystray.Menu.SEPARATOR,
             item(f"{APP_NAME} v{__version__}", lambda: None, enabled=False),
@@ -159,8 +157,13 @@ class App:
             self._on_results(arg)
         elif kind == "pin":
             self.popup.set_pinned(not self.settings["pinned"])
-        elif kind == "graph":
-            self.open_graph()
+        elif kind == "history":
+            if not self.popup.visible:            # 트레이 메뉴에서 켜면 팝업과 함께 보여준다
+                self.settings["history_open"] = True
+                self.icon.update_menu()
+                self.popup.show()
+            else:
+                self.popup.toggle_history()
         elif kind == "settings":
             self.open_settings()
         elif kind == "quit":
@@ -205,8 +208,8 @@ class App:
             self._flush_notes()
             self._update_tray()
             self.popup.render_if_visible()
-            if self.graph and self.graph.alive():
-                self.graph.redraw()
+            if self.popup.history.alive():
+                self.popup.history.redraw()
             if self.settings_win and self.settings_win.alive():
                 self.settings_win.refresh_status()
         finally:
@@ -259,12 +262,6 @@ class App:
             self.icon.icon = tray_image(text, color)
             self.icon.title = title
 
-    def open_graph(self) -> None:
-        if self.graph and self.graph.alive():
-            self.graph.focus()
-        else:
-            self.graph = HistoryWindow(self)
-
     def open_settings(self) -> None:
         if self.settings_win and self.settings_win.alive():
             self.settings_win.focus()
@@ -296,6 +293,8 @@ class Popup:
         self._sig = None
         self._geom = None
         self._drag = (0, 0)
+        self._scrolling = False
+        self.history = HistoryPanel(self)      # 팝업 옆에 붙는 사용 기록 패널
 
     def px(self, v: float) -> int:
         return int(round(v * self.app.scale))
@@ -303,6 +302,41 @@ class Popup:
     @property
     def pinned(self) -> bool:
         return bool(self.app.settings["pinned"])
+
+    @property
+    def scrolling(self) -> bool:
+        return self._scrolling
+
+    def card_layout(self) -> dict:
+        """서비스 ID → (카드 프레임, 사용량 줄 수). 기록 패널이 그래프 위치·크기를 정하는 데 쓴다."""
+        return {pid: (refs["frame"], len(refs.get("rows", {})))
+                for pid, refs in self.refs.get("cards", {}).items() if "frame" in refs}
+
+    # ── 기록 패널 ─────────────────────────────────────────
+    def toggle_history(self) -> None:
+        on = not self.app.settings["history_open"]
+        self.app.settings["history_open"] = on
+        self.app.icon.update_menu()
+        self._style_toggles()
+        if on and self.visible:
+            self.history.show()
+        else:
+            self.history.hide()
+
+    def _style_toggles(self) -> None:
+        """패널 버튼 강조만 바꾼다 (팝업 전체를 다시 만들면 깜빡인다)."""
+        b = self.refs.get("btn_history")
+        if b:
+            b.configure(fg=self.app.pal["text"] if self.app.settings["history_open"] else self.app.pal["text2"])
+
+    def rebuild_history_panel(self) -> None:
+        """언어를 바꾸면 패널 머리글 글자도 바뀌어야 해서 새로 만든다."""
+        was_open = self.history.alive()
+        if self.history.win:
+            self.history.win.destroy()
+        self.history = HistoryPanel(self)
+        if was_open:
+            self.history.show()
 
     # ── 보이기/숨기기 ─────────────────────────────────────
     def _create(self) -> None:
@@ -323,7 +357,6 @@ class Popup:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.frame = tk.Frame(self.canvas, bg=pal["bg"])
         self._frame_id = self.canvas.create_window(0, 0, window=self.frame, anchor="nw")
-        self._scrolling = False
         self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
 
     def show(self) -> None:
@@ -334,10 +367,13 @@ class Popup:
         self.win.deiconify()
         self.win.lift()
         winutil.round_corners(self.win)
+        if self.app.settings["history_open"]:
+            self.history.show()
         if not self.pinned:
             self.win.after(50, self.win.focus_force)
 
     def hide(self) -> None:
+        self.history.hide()
         if self.win and self.visible:
             self.win.withdraw()
             self.visible = False
@@ -392,6 +428,7 @@ class Popup:
         if (w, h, x, y) != self._geom:       # 크기·위치가 바뀔 때만 옮긴다
             self._geom = (w, h, x, y)
             self.win.geometry(f"{w}x{h}+{x}+{y}")
+        self.history.follow()
 
     def _on_wheel(self, e) -> None:
         if not (self._scrolling and self.visible):
@@ -410,6 +447,7 @@ class Popup:
     def _drag_move(self, e) -> None:
         if self.pinned:
             self.win.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
+            self.history.follow()
 
     def _drag_end(self, e) -> None:
         if self.pinned:
@@ -476,6 +514,7 @@ class Popup:
             self._sig = sig
         else:
             self._apply(m)
+        self._style_toggles()                  # 숨겨진 동안 트레이 메뉴로 패널을 켠 경우에도 버튼 강조를 맞춘다
         self._place()
 
     # ── 처음 만들기 ───────────────────────────────────────
@@ -521,9 +560,12 @@ class Popup:
                                    (GLYPH["unpin" if self.pinned else "pin"],
                                     lambda: self.set_pinned(not self.pinned), self.pinned),
                                    (GLYPH["settings"], self.app.open_settings, False),
-                                   (GLYPH["chart"], self.app.open_graph, False),
+                                   (GLYPH["chart"], self.toggle_history, bool(self.app.settings["history_open"])),
                                    (GLYPH["refresh"], self.app.refresh, False)):
-            self._icon_button(head, glyph, cmd, active).pack(side="right")
+            b = self._icon_button(head, glyph, cmd, active)
+            b.pack(side="right")
+            if cmd == self.toggle_history:
+                self.refs["btn_history"] = b
         for w in (head, title):
             w.bind("<ButtonPress-1>", self._drag_start)
             w.bind("<B1-Motion>", self._drag_move)
@@ -534,6 +576,7 @@ class Popup:
         refs: dict = {"rows": {}, "extras": []}
         card = tk.Frame(parent, bg=pal["card"], highlightthickness=1, highlightbackground=pal["border"])
         card.pack(fill="x", padx=px(10), pady=px(4))
+        refs["frame"] = card
         inner = tk.Frame(card, bg=pal["card"])
         inner.pack(fill="x", padx=px(12), pady=(px(9), px(11)))
 

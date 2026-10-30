@@ -14,7 +14,7 @@ agent_usage/
   models.py                 Usage / Window / ResetCredits
   app.py                    tray icon + popup (updates values in place, no flicker)
   settings_window.py        settings UI
-  graph.py                  usage history chart
+  history_panel.py          usage history panel docked next to the popup (mini chart per service)
   notify.py                 low / reset / reset-credit alerts
   i18n.py                   Korean and English strings
   store.py                  settings.json, history.sqlite

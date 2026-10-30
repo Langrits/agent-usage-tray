@@ -19,7 +19,7 @@ suffix = (f"_{lang}" if lang else "") + ("_dark" if "--dark" in args else "")
 if fake:
     os.environ["AGENT_USAGE_DATA"] = tempfile.mkdtemp(prefix="agent_usage_demo_")
 
-from PIL import ImageGrab  # noqa: E402
+from PIL import Image, ImageGrab  # noqa: E402
 
 import agent_usage.app as app_mod  # noqa: E402
 from agent_usage import theme  # noqa: E402
@@ -78,6 +78,7 @@ if fake:
 
 app = app_mod.App()
 app.notifier.check = lambda usage: None     # 캡처 중에는 실제 알림을 보내지 않는다
+app.popup._check_focus = lambda: None       # 캡처 중 다른 창을 눌러도 팝업이 닫히지 않게
 if fake:
     seed(app.history)
 
@@ -102,16 +103,35 @@ def check_rerender():
     app.popup.render()                      # 20초 갱신과 같은 경로
     print("rebuilt on re-render:", app.popup.body is not body)
     grab(app.popup.win, f"popup{suffix}.png")
-    app.open_graph()
-    app.root.after(1200, shot_graph)
+    if not app.settings["history_open"]:
+        app.popup.toggle_history()
+    app.root.after(1200, shot_history)
 
 
-def shot_graph():
-    c = app.graph.canvas
-    c.event_generate("<Motion>", x=int(c.winfo_width() * 0.62), y=int(c.winfo_height() * 0.5))
-    grab(app.graph.win, f"graph{suffix}.png")
+def shot_history():
+    """팝업 옆 사용 기록 패널: 두 창을 한 장으로 (첫 구역 그래프에 마우스를 올린 상태)."""
+    panel = app.popup.history
+    first = next(iter(panel.sections.values()), None)
+    if first is not None:
+        first.event_generate("<Motion>", x=int(first.winfo_width() * 0.7), y=int(first.winfo_height() * 0.5))
+    grab_all([panel.win, app.popup.win], f"history{suffix}.png")
     app.open_settings()
     app.root.after(800, shot_settings)
+
+
+def grab_all(wins, name):
+    """여러 창을 한 장으로. 창 사이·바깥은 투명하게 둔다 (뒤에 있던 다른 프로그램 화면이 찍히지 않게)."""
+    for w in wins:
+        w.update()
+    boxes = [(w.winfo_rootx(), w.winfo_rooty(), w.winfo_rootx() + w.winfo_width(), w.winfo_rooty() + w.winfo_height())
+             for w in wins]
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    x1, y1 = max(b[2] for b in boxes), max(b[3] for b in boxes)
+    sheet = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    for b in boxes:
+        sheet.paste(ImageGrab.grab(bbox=b, all_screens=True), (b[0] - x0, b[1] - y0))
+    sheet.save(os.path.join(out_dir, name))
+    print("saved", name, x1 - x0, y1 - y0)
 
 
 def shot_settings():
