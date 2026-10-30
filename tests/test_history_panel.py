@@ -1,7 +1,8 @@
 """사용 기록 패널의 위치 계산과 데이터 묶기 테스트 (창은 띄우지 않는다)."""
 import unittest
 
-from agent_usage.history_panel import fit_legend, group_series, panel_x, uniform_height
+from agent_usage.history_panel import (chart_height, fit_legend, group_series, panel_x, stack_height,
+                                       uniform_height)
 
 
 class UniformHeightTest(unittest.TestCase):
@@ -11,6 +12,23 @@ class UniformHeightTest(unittest.TestCase):
 
     def test_falls_back_when_no_card_has_a_single_row(self):
         self.assertEqual(uniform_height([(262, 3), (80, 0)], 150), 150)
+
+
+class ChartHeightTest(unittest.TestCase):
+    def test_single_row_card_sets_the_size_and_charts_line_up(self):
+        self.assertEqual(chart_height([(262, 3), (143, 1), (140, 1)], 150, 64), (140, True))
+
+    def test_a_shorter_card_shrinks_every_chart_alike(self):
+        # 로그인 오류 카드(0줄, 90px)가 있으면 모두 90px로 맞춘다
+        self.assertEqual(chart_height([(262, 3), (140, 1), (90, 0)], 150, 64), (90, True))
+
+    def test_too_short_a_card_stacks_instead(self):
+        self.assertEqual(chart_height([(262, 3), (140, 1), (40, 0)], 150, 64), (140, False))
+
+    def test_stacked_charts_shrink_together_to_fit_the_panel(self):
+        # 머리글 아래 450px에 4개, 간격 8 → (450 - 24) // 4 = 106
+        self.assertEqual(stack_height(140, 4, 450, 8), 106)
+        self.assertEqual(stack_height(140, 4, 1000, 8), 140)
 
 
 class FitLegendTest(unittest.TestCase):
@@ -30,6 +48,17 @@ class FitLegendTest(unittest.TestCase):
         shown, hidden = fit_legend(labels, 220, self.measure, 22)
         self.assertEqual(shown, ["Alpha model", "Beta model"])
         self.assertEqual(hidden, 2)
+
+    def test_never_wider_than_the_space(self):
+        labels = ["Alpha model", "Beta model"]
+        for width in range(0, 260, 5):
+            shown, hidden = fit_legend(labels, width, self.measure, 22)
+            used = sum(self.measure(s) + 22 for s in shown) + (self.measure(f"+{hidden}") if hidden else 0)
+            self.assertLessEqual(used, width, width)
+
+    def test_only_the_count_when_no_name_fits(self):
+        self.assertEqual(fit_legend(["Alpha model", "Beta model"], 30, self.measure, 22), ([], 2))
+        self.assertEqual(fit_legend(["Alpha model", "Beta model"], 10, self.measure, 22), ([], 0))
 
 
 class PanelPositionTest(unittest.TestCase):

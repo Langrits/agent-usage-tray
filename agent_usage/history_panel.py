@@ -37,6 +37,26 @@ def uniform_height(cards: list[tuple[int, int]], default: int) -> int:
     return min(singles) if singles else default
 
 
+def chart_height(cards: list[tuple[int, int]], default: int, floor: int) -> tuple[int, bool]:
+    """(그래프 높이, 카드에 맞춰 놓을 수 있는지).
+
+    오류 카드처럼 그보다 낮은 카드가 있으면 크기를 맞추려고 모두 그 높이로 줄이고,
+    그마저 floor보다 낮으면 카드에 맞추지 않고 원래 높이로 쌓는다.
+    """
+    h = uniform_height(cards, default)
+    shortest = min((ch for ch, _ in cards if ch > 1), default=h)
+    if shortest >= h:
+        return h, True
+    return (shortest, True) if shortest >= floor else (h, False)
+
+
+def stack_height(h: int, count: int, space: int, gap: int) -> int:
+    """쌓을 때 그래프 높이: 패널 안(space)에 다 들어가게 필요하면 모두 같이 줄인다."""
+    if count <= 0:
+        return h
+    return max(1, min(h, (space - gap * (count - 1)) // count))
+
+
 _SUFFIX = re.compile(r"\s*\([^()]*\)$")
 
 
@@ -45,6 +65,7 @@ def fit_legend(labels: list[str], width: int, measure, extra: int) -> tuple[list
 
     measure(글자) → 픽셀 폭, extra = 항목마다 붙는 선 표시·간격 폭.
     넘치면 ① 모든 이름에 같은 꼬리표("(하루)" 등)가 있을 때 떼고 ② 그래도 넘치면 뒤에서부터 빼고 "+N"을 붙인다.
+    아주 좁으면 이름 없이 "+N"만, 그마저 안 들어가면 범례를 비운다.
     """
     def total(items, hidden=0):
         return sum(measure(s) + extra for s in items) + (measure(f"+{hidden}") if hidden else 0)
@@ -57,8 +78,10 @@ def fit_legend(labels: list[str], width: int, measure, extra: int) -> tuple[list
         if total(labels) <= width:
             return labels, 0
     shown = list(labels)
-    while len(shown) > 1 and total(shown, len(labels) - len(shown)) > width:
+    while shown and total(shown, len(labels) - len(shown)) > width:
         shown.pop()
+    if not shown and total([], len(labels)) > width:
+        return [], 0
     return shown, len(labels) - len(shown)
 
 
@@ -140,8 +163,9 @@ class HistoryPanel:
         layout = self.popup.card_layout()
         top_y = self.head.winfo_y() + self.head.winfo_height() + self.px(4)   # 패널 머리글 아래
         # 그래프 크기는 모두 같게: 사용량이 1줄인 카드 높이 (Claude처럼 줄이 많은 카드에 맞춰 커지지 않게)
-        chart_h = uniform_height([(f.winfo_height(), rows) for f, rows in layout.values()], self.px(140))
-        aligned = layout and not self.popup.scrolling and all(pid in layout for pid in self.sections)
+        chart_h, fits = chart_height([(f.winfo_height(), rows) for f, rows in layout.values()],
+                                     self.px(140), self.px(64))
+        aligned = fits and layout and not self.popup.scrolling and all(pid in layout for pid in self.sections)
         if aligned:
             # 각 그래프 위쪽을 그 서비스 카드 위쪽에 맞춘다. 두 창은 위쪽 높이가 같으므로 팝업 창 기준으로 잰다
             # (막 옮긴 패널 자신의 위치는 아직 옛값일 수 있다). +1: 패널 프레임은 테두리 1px 안쪽에서 시작한다
@@ -149,10 +173,10 @@ class HistoryPanel:
             for pid, canvas in self.sections.items():
                 card = layout[pid][0]
                 y = max(card.winfo_rooty() - base, top_y)
-                canvas.place(x=self.px(10), y=y, relwidth=1, width=-self.px(20),
-                             height=min(chart_h, card.winfo_height()))
-        else:      # 팝업이 화면보다 길어 스크롤될 때는 카드에 맞추지 않고 머리글 아래부터 차례로 쌓는다
+                canvas.place(x=self.px(10), y=y, relwidth=1, width=-self.px(20), height=chart_h)
+        else:      # 팝업이 화면보다 길어 스크롤될 때 등은 카드에 맞추지 않고 머리글 아래부터 차례로 쌓는다
             gap = self.px(8)
+            chart_h = stack_height(chart_h, len(self.sections), height - top_y - self.px(10), gap)
             for i, canvas in enumerate(self.sections.values()):
                 canvas.place(x=self.px(10), y=top_y + i * (chart_h + gap), relwidth=1, width=-self.px(20),
                              height=chart_h)
@@ -219,7 +243,9 @@ class HistoryPanel:
         if not hasattr(self, "_title_font"):      # 글자 폭을 정확히 재려고 실제 글꼴을 쓴다
             self._title_font = tkfont.Font(family=theme.FONT, size=9, weight="bold")
             self._small_font = tkfont.Font(family=theme.FONT, size=7)
-        return self._title_font, self._small_font
+            self._tip_bold = tkfont.Font(family=theme.FONT, size=8, weight="bold")
+            self._tip_font = tkfont.Font(family=theme.FONT, size=8)
+        return self._title_font, self._small_font, self._tip_bold, self._tip_font
 
     def _ordered_windows(self, pid: str) -> list[str]:
         """범례 순서는 팝업 카드의 한도 순서를 따른다."""
@@ -231,7 +257,7 @@ class HistoryPanel:
     def _legend_layout(self, c: tk.Canvas) -> list[tuple[int, str, str | None]]:
         """범례 배치 [(x, 글자, 색)]: 제목 오른쪽에 이름만 한 줄로. 넘치면 '+N'(색 없음)."""
         px = self.px
-        title_font, small = self._fonts()
+        title_font, small = self._fonts()[:2]
         mod = BY_ID.get(c.pid)
         x0 = px(8) + title_font.measure(mod.TITLE if mod else c.pid) + px(10)
         series = self.data.get(c.pid, {})
@@ -330,15 +356,24 @@ class HistoryPanel:
             return
         d = datetime.fromtimestamp(ts)
         lines = [f"{d.month}/{d.day} {d:%H:%M}"] + [f"{label} {used:.0f}%" for label, used, _ in rows]
-        lh, tw = px(14), max(len(s) for s in lines) * px(6) + px(24)
+        # 그래프 칸 안에 다 들어가게: 줄이 넘치면 뒤쪽 항목은 "+N"으로 묶는다
+        lh, cw, ch = px(14), c.winfo_width(), c.winfo_height()
+        fit = max(2, (ch - px(10)) // lh)
+        more = len(lines) > fit
+        if more:
+            lines = lines[:fit - 1] + [f"+{len(lines) - fit + 1}"]
+        bold, regular = self._fonts()[2:]
+        tw = max([bold.measure(lines[0])] + [regular.measure(s) + px(10) for s in lines[1:]]) + px(14)
         th = lh * len(lines) + px(6)
         x = e.x + px(10) if e.x + px(10) + tw < right else e.x - px(10) - tw
-        y = top
+        x = max(px(2), min(x, cw - tw - px(2)))
+        y = max(px(2), min(top, ch - th - px(2)))
         c.create_rectangle(x, y, x + tw, y + th, fill=pal["bg"], outline=pal["border"], tags="hover")
         for i, s in enumerate(lines):
             ty = y + px(3) + lh * i + lh / 2
-            if i:
+            row = 0 < i and not (more and i == len(lines) - 1)
+            if row:
                 c.create_rectangle(x + px(6), ty - px(3), x + px(12), ty + px(3), fill=rows[i - 1][2],
                                    outline="", tags="hover")
-            c.create_text(x + px(16 if i else 6), ty, text=s, anchor="w", tags="hover",
-                          font=(theme.FONT, 8, "bold") if not i else (theme.FONT, 8), fill=pal["text"])
+            c.create_text(x + px(16 if row else 6), ty, text=s, anchor="w", tags="hover",
+                          font=bold if not i else regular, fill=pal["text"] if row or not i else pal["muted"])
