@@ -514,6 +514,7 @@ class Popup:
             self._sig = sig
         else:
             self._apply(m)
+        self._style_toggles()                  # 숨겨진 동안 트레이 메뉴로 패널을 켠 경우에도 버튼 강조를 맞춘다
         self._place()
 
     # ── 처음 만들기 ───────────────────────────────────────
