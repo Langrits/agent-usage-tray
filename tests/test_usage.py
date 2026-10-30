@@ -58,6 +58,45 @@ class LegacyMergeTest(unittest.TestCase):
         migrate_legacy(target, [a, b], merged)                        # 바뀐 게 없으면 다시 합쳐도 그대로
         self.assertEqual(self.count(target), 3)
 
+    def remove_all(self, target):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(target, "history.sqlite"))
+        con.execute("delete from samples")
+        con.commit()
+        con.close()
+
+    def add_row(self, src, row, mtime):
+        import sqlite3
+        con = sqlite3.connect(os.path.join(src, "history.sqlite"))
+        con.execute("insert into samples values (?,?,?,?,?,?)", row)
+        con.commit()
+        con.close()
+        os.utime(os.path.join(src, "history.sqlite"), (mtime, mtime))
+
+    def test_remerges_only_changed_sources(self):
+        a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
+        os.utime(os.path.join(a, "history.sqlite"), (5_000, 5_000))
+        target = tempfile.mkdtemp()
+        merged = migrate_legacy(target, [a])
+        self.remove_all(target)
+        merged = migrate_legacy(target, [a], merged)
+        self.assertEqual(self.count(target), 0)                       # 바뀌지 않은 원본은 다시 읽지 않는다
+        self.add_row(a, (2000.0, "claude", "five_hour", "5h", 20.0, None), 6_000)
+        merged = migrate_legacy(target, [a], merged)
+        self.assertEqual(self.count(target), 2)                       # 바뀐 원본은 전부 다시 합친다
+        self.remove_all(target)
+        os.utime(os.path.join(a, "history.sqlite"), (4_000, 4_000))   # 예전 백업으로 되돌려 시각이 줄어도
+        migrate_legacy(target, [a], merged)
+        self.assertEqual(self.count(target), 2)
+
+    def test_recreated_target_db_merges_everything_again(self):
+        a = self.make_legacy([(1000.0, "claude", "five_hour", "5h", 10.0, None)], "{}", 1_000)
+        target = tempfile.mkdtemp()
+        merged = migrate_legacy(target, [a])
+        os.remove(os.path.join(target, "history.sqlite"))
+        migrate_legacy(target, [a], merged)
+        self.assertEqual(self.count(target), 1)
+
     def test_legacy_dirs_include_store_app_copies(self):
         local = tempfile.mkdtemp()
         real = os.path.join(local, "AgentUsage")

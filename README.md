@@ -71,7 +71,7 @@ Open **Settings…** from the tray menu or the ⚙ button in the popup.
 
 Settings, history and logs live in `%USERPROFILE%\.ai-usage-tray`.
 
-Versions up to 0.1.1 used `%LOCALAPPDATA%\AgentUsage`. When the app was started from inside a Microsoft Store (MSIX) app, Windows redirected those writes to that app's private folder (`%LOCALAPPDATA%\Packages\<app>\LocalCache\Local\AgentUsage`), so history could end up split in two places. On start the app merges the history from all of these into the new folder; you can delete the old folders afterwards.
+Versions up to 0.1.1 used `%LOCALAPPDATA%\AgentUsage`. When the app was started from inside a Microsoft Store (MSIX) app, Windows redirected those writes to that app's private folder (`%LOCALAPPDATA%\Packages\<app>\LocalCache\Local\AgentUsage`), so history could end up split in two places. On start the app merges the history from all of these into the new folder (it tries again on the next start if an old folder couldn't be read). Once your older history shows up in the app, you can delete the old folders.
 
 ## Privacy and how it works
 

@@ -71,7 +71,7 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 
 설정·기록·로그는 `%USERPROFILE%\.ai-usage-tray`에 저장돼요.
 
-0.1.1까지는 `%LOCALAPPDATA%\AgentUsage`를 썼어요. 그런데 이 프로그램을 스토어(MSIX) 앱 안에서 실행하면, Windows가 그 기록을 해당 앱 전용 폴더(`%LOCALAPPDATA%\Packages\<앱>\LocalCache\Local\AgentUsage`)로 돌려 저장해요. 그래서 기록이 두 곳에 나뉠 수 있었어요. 지금 버전은 시작할 때 이 위치들의 기록을 모두 새 폴더로 합쳐요. 합친 뒤에는 예전 폴더를 지워도 돼요.
+0.1.1까지는 `%LOCALAPPDATA%\AgentUsage`를 썼어요. 그런데 이 프로그램을 스토어(MSIX) 앱 안에서 실행하면, Windows가 그 기록을 해당 앱 전용 폴더(`%LOCALAPPDATA%\Packages\<앱>\LocalCache\Local\AgentUsage`)로 돌려 저장해요. 그래서 기록이 두 곳에 나뉠 수 있었어요. 지금 버전은 시작할 때 이 위치들의 기록을 모두 새 폴더로 합쳐요. 예전 폴더를 읽지 못하면 다음에 시작할 때 다시 시도해요. 앱에서 예전 기록이 보이는 걸 확인한 뒤에 예전 폴더를 지우세요.
 
 ## 개인정보와 동작 방식
 
