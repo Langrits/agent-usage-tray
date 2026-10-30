@@ -160,6 +160,7 @@ class App:
         elif kind == "history":
             if not self.popup.visible:            # 트레이 메뉴에서 켜면 팝업과 함께 보여준다
                 self.settings["history_open"] = True
+                self.icon.update_menu()
                 self.popup.show()
             else:
                 self.popup.toggle_history()
