@@ -89,10 +89,12 @@ def migrate_legacy(target: str, sources: list[str]) -> None:
 
 
 def _copy_json_atomic(src: str, dest: str) -> bool:
-    """올바른 JSON일 때만 임시 파일에 써서 바꿔치기한다 (중간에 끊겨도 반쪽 파일이 남지 않게)."""
+    """올바른 설정 JSON(객체)일 때만 임시 파일에 써서 바꿔치기한다 (중간에 끊겨도 반쪽 파일이 남지 않게)."""
     try:
         with open(src, encoding="utf-8") as f:
             data = json.load(f)
+        if not isinstance(data, dict):        # null·목록 등은 설정으로 쓸 수 없으니 다음 사본을 찾는다
+            return False
         tmp = dest + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
@@ -133,9 +135,11 @@ class JsonFile:
         self.data = dict(defaults or {})
         try:
             with open(self.path, encoding="utf-8") as f:
-                self.data.update(json.load(f))
+                loaded = json.load(f)
         except (FileNotFoundError, ValueError):
-            pass
+            return
+        if isinstance(loaded, dict):          # 내용이 null 등이면 기본값으로 시작한다 (실행이 멈추지 않게)
+            self.data.update(loaded)
 
     def __getitem__(self, key):
         return self.data.get(key)

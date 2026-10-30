@@ -67,6 +67,22 @@ class LegacyMergeTest(unittest.TestCase):
             self.assertEqual(json.load(f), {"pinned": True})
         self.assertFalse(os.path.exists(os.path.join(target, "settings.json.tmp")))
 
+    def test_settings_that_are_not_an_object_are_skipped(self):
+        a = self.make_legacy([], '{"pinned": true}', 1_000)
+        b = self.make_legacy([], 'null', 2_000)                          # 더 최근이지만 객체가 아님
+        target = tempfile.mkdtemp()
+        migrate_legacy(target, [a, b])
+        with open(os.path.join(target, "settings.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"pinned": True})
+
+    def test_settings_file_with_null_starts_from_defaults(self):
+        import agent_usage.store as store
+        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
+            self.skipTest("store points at the real data folder")
+        with open(os.path.join(store.DATA_DIR, "null_test.json"), "w", encoding="utf-8") as f:
+            f.write("null")
+        self.assertEqual(store.JsonFile("null_test.json", {"a": 1}).data, {"a": 1})
+
     def remove_all(self, target):
         import sqlite3
         con = sqlite3.connect(os.path.join(target, "history.sqlite"))
