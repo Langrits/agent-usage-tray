@@ -128,6 +128,10 @@ class NotifyTest(unittest.TestCase):
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
+        # 이 테스트는 기록을 비운다. 다른 테스트가 먼저 store를 불러와 실제 기록 폴더를 가리키고 있으면 절대 실행하지 않는다
+        import agent_usage.store as store
+        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
+            self.skipTest("store points at the real data folder")
         self.h = History()
         self.h.con.execute("delete from samples")
         self.h.con.commit()
