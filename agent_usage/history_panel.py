@@ -79,6 +79,7 @@ class HistoryPanel:
         self.win.deiconify()
         self.win.lift()
         winutil.round_corners(self.win)
+        self.win.after(50, self.follow)      # 화면에 나타난 뒤 한 번 더 맞춘다
 
     def hide(self) -> None:
         if self.win and self.visible:
@@ -107,8 +108,9 @@ class HistoryPanel:
         top_y = self.head.winfo_y() + self.head.winfo_height() + self.px(4)   # 패널 머리글 아래
         aligned = cards and not self.popup.scrolling and all(pid in cards for pid in self.sections)
         if aligned:
-            # 화면 좌표로 맞춘다: 카드의 화면 위치 - 이 패널 프레임의 화면 위치 (두 창은 같은 높이에 붙어 있다)
-            base = self.frame.winfo_rooty()
+            # 두 창은 위쪽 높이가 같으므로 팝업 창 기준으로 잰다 (막 옮긴 패널 자신의 위치는 아직 옛값일 수 있다).
+            # -1: 패널 프레임은 테두리 1px 안쪽에서 시작한다
+            base = self.popup.win.winfo_rooty() + 1
             for pid, canvas in self.sections.items():
                 card = cards[pid]
                 y = card.winfo_rooty() - base
