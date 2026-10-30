@@ -1,7 +1,7 @@
-"""개발용: 앱을 띄워 팝업·그래프·설정 화면을 PNG로 저장하고 종료한다.
+"""개발용: 앱을 띄워 팝업·사용 기록·작업 현황·설정 화면을 PNG로 저장하고 종료한다.
 
 python tools/snapshot.py <저장폴더> [--fake] [--lang ko|en] [--dark]
---fake: 실제 조회 대신 가짜 데이터(4개 서비스)와 가짜 7일치 기록을 임시 폴더에 넣는다 (README 스크린샷용).
+--fake: 실제 조회 대신 가짜 데이터(4개 서비스), 가짜 7일치 기록, 가짜 작업 현황을 쓴다 (README 스크린샷용).
 """
 import os
 import random
@@ -72,9 +72,31 @@ def seed(history):
     history.con.commit()
 
 
+def fake_activity():
+    """README용 가짜 작업 현황 (실제 대화 제목이 공개되지 않게)."""
+    from agent_usage.activity import LIMITED, RUNNING, STALLED, WAITING, Item, Snapshot
+    ko = (lang or "ko") == "ko"
+    now = time.time()
+    m = lambda mins: now - mins * 60
+    items = [
+        Item("codex:1", "codex", "Codex exec", "결제 모듈 변경 검토" if ko else "Review the payment changes",
+             WAITING, m(2), m(2)),
+        Item("claude:2", "claude", "Claude", "API 문서 정리" if ko else "Tidy up API docs", LIMITED, m(95), m(95),
+             open_url="claude://x"),
+        Item("claude:1", "claude", "Claude", "결제 모듈 리팩터링" if ko else "Refactor the payment module",
+             RUNNING, m(12), m(0), open_url="claude://x"),
+        Item("cursor:1", "cursor", "Cursor", "로그인 화면 다듬기" if ko else "Polish the login screen",
+             RUNNING, None, m(1), open_url="cursor://x"),
+        Item("codex:2", "codex", "Codex", "데이터셋 중복 검사" if ko else "Check dataset duplicates",
+             STALLED, m(40), m(14)),
+    ]
+    return Snapshot(items, [], now)
+
+
 if fake:
     app_mod.fetch_all = fake_usages
     app_mod.App.compute_visible = lambda self: ["claude", "codex", "cursor", "gemini"]
+    app_mod.activity.collect = fake_activity
 
 app = app_mod.App()
 app.notifier.check = lambda usage: None     # 캡처 중에는 실제 알림을 보내지 않는다
@@ -115,6 +137,16 @@ def shot_history():
     if first is not None:
         first.event_generate("<Motion>", x=int(first.winfo_width() * 0.7), y=int(first.winfo_height() * 0.5))
     grab_all([panel.win, app.popup.win], f"history{suffix}.png")
+    if not app.settings["activity_open"]:
+        app.popup.toggle_activity()
+    app.root.after(1200, shot_activity)
+
+
+def shot_activity():
+    """작업 현황 패널까지 연 모습: [작업 현황][사용 기록][팝업]."""
+    for c in app.popup.history.sections.values():      # 앞 장면의 마우스 올림 표시는 지운다
+        c.delete("hover")
+    grab_all([app.popup.activity.win, app.popup.history.win, app.popup.win], f"activity{suffix}.png")
     app.open_settings()
     app.root.after(800, shot_settings)
 

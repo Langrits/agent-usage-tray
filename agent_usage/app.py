@@ -16,8 +16,9 @@ import tkinter as tk
 import pystray
 from PIL import Image, ImageDraw, ImageFont
 
-from . import APP_NAME, __version__, i18n, theme, winutil
+from . import APP_NAME, __version__, activity, i18n, theme, winutil
 from . import format as fmt
+from .activity_panel import ActivityPanel
 from .history_panel import HistoryPanel
 from .i18n import t
 from .models import Usage
@@ -28,6 +29,8 @@ from .store import DATA_DIR, History, settings
 
 GLYPH = {"refresh": "", "chart": "", "pin": "", "unpin": "",
          "close": "", "settings": ""}
+GLYPH["activity"] = ""      # 목록 (작업 현황)
+ACTIVITY_EVERY_S = 15             # 팝업이 열려 있는 동안 작업 현황을 다시 모으는 간격
 log = logging.getLogger("agent_usage")
 
 
@@ -58,6 +61,8 @@ class App:
         self.good: dict[str, Usage] = {}      # 마지막 성공 결과
         self.visible: list[str] = self.compute_visible()
         self.updated_at: float | None = None
+        self.activity: activity.Snapshot | None = None    # 마지막으로 모은 작업 현황
+        self._activity_busy = False
         self.fetching = False
         self._refresh_again = False
         self._quitting = False
@@ -102,7 +107,7 @@ class App:
         elif key == "language":
             i18n.set_language(value)
             self.icon.update_menu()
-            self.popup.rebuild_history_panel()
+            self.popup.rebuild_panels()
             self.refresh()          # 한도 이름 등은 조회할 때 만들어지므로 새로 조회
         elif key == "refresh_minutes":
             if not self.fetching:
@@ -123,6 +128,8 @@ class App:
             item(lambda _: t("menu_pin"), lambda: self.post("pin"), checked=lambda _: bool(self.settings["pinned"])),
             item(lambda _: t("menu_history"), lambda: self.post("history"),
                  checked=lambda _: bool(self.settings["history_open"])),
+            item(lambda _: t("menu_activity"), lambda: self.post("activity"),
+                 checked=lambda _: bool(self.settings["activity_open"])),
             item(lambda _: t("menu_settings"), lambda: self.post("settings")),
             pystray.Menu.SEPARATOR,
             item(f"{APP_NAME} v{__version__}", lambda: None, enabled=False),
@@ -164,6 +171,15 @@ class App:
                 self.popup.show()
             else:
                 self.popup.toggle_history()
+        elif kind == "activity":
+            if not self.popup.visible:
+                self.settings["activity_open"] = True
+                self.icon.update_menu()
+                self.popup.show()
+            else:
+                self.popup.toggle_activity()
+        elif kind == "activity_result":
+            self._on_activity(arg)
         elif kind == "settings":
             self.open_settings()
         elif kind == "quit":
@@ -262,6 +278,35 @@ class App:
             self.icon.icon = tray_image(text, color)
             self.icon.title = title
 
+    # ── 작업 현황 (기록 파일을 읽으므로 별도 스레드에서) ──────────
+    def refresh_activity(self) -> None:
+        if self._activity_busy:
+            return
+        self._activity_busy = True
+
+        def work():
+            try:
+                snap = activity.collect()
+            except Exception:
+                log.exception("activity collect failed")
+                snap = None
+            self.post("activity_result", snap)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_activity(self, snap) -> None:
+        self._activity_busy = False
+        if snap is None:
+            return
+        self.activity = snap
+        self.popup.update_activity_count()
+        if self.popup.activity.alive():
+            self.popup.activity.redraw()
+
+    def _activity_tick(self) -> None:
+        if self.popup.visible:          # 팝업을 볼 때만 모은다 (머리글 버튼의 개수·패널)
+            self.refresh_activity()
+        self.root.after(ACTIVITY_EVERY_S * 1000, self._activity_tick)
+
     def open_settings(self) -> None:
         if self.settings_win and self.settings_win.alive():
             self.settings_win.focus()
@@ -274,6 +319,7 @@ class App:
         self.root.after(100, self._poll)
         self.root.after(300, self.refresh)
         self.root.after(20000, self._tick)
+        self.root.after(ACTIVITY_EVERY_S * 1000, self._activity_tick)
         if self.settings["pinned"]:
             self.root.after(400, self.popup.show)
         self.root.mainloop()
@@ -295,6 +341,7 @@ class Popup:
         self._drag = (0, 0)
         self._scrolling = False
         self.history = HistoryPanel(self)      # 팝업 옆에 붙는 사용 기록 패널
+        self.activity = ActivityPanel(self)    # 그 바깥쪽에 붙는 작업 현황 패널
 
     def px(self, v: float) -> int:
         return int(round(v * self.app.scale))
@@ -322,21 +369,49 @@ class Popup:
             self.history.show()
         else:
             self.history.hide()
+        self.activity.follow()                 # 작업 현황 패널은 기록 패널 바깥쪽에 붙는다
 
     def _style_toggles(self) -> None:
         """패널 버튼 강조만 바꾼다 (팝업 전체를 다시 만들면 깜빡인다)."""
-        b = self.refs.get("btn_history")
-        if b:
-            b.configure(fg=self.app.pal["text"] if self.app.settings["history_open"] else self.app.pal["text2"])
+        pal = self.app.pal
+        for name in ("history", "activity"):
+            b = self.refs.get("btn_" + name)
+            if b:
+                b.configure(fg=pal["text"] if self.app.settings[name + "_open"] else pal["text2"])
 
-    def rebuild_history_panel(self) -> None:
+    def toggle_activity(self) -> None:
+        on = not self.app.settings["activity_open"]
+        self.app.settings["activity_open"] = on
+        self.app.icon.update_menu()
+        self._style_toggles()
+        if on and self.visible:
+            self.activity.show()
+            self.app.refresh_activity()
+        else:
+            self.activity.hide()
+
+    def rebuild_panels(self) -> None:
         """언어를 바꾸면 패널 머리글 글자도 바뀌어야 해서 새로 만든다."""
-        was_open = self.history.alive()
-        if self.history.win:
-            self.history.win.destroy()
+        was_open = self.history.alive(), self.activity.alive()
+        for panel in (self.history, self.activity):
+            if panel.win:
+                panel.win.destroy()
         self.history = HistoryPanel(self)
-        if was_open:
+        self.activity = ActivityPanel(self)
+        if was_open[0]:
             self.history.show()
+        if was_open[1]:
+            self.activity.show()
+
+    def update_activity_count(self) -> None:
+        """머리글 작업 현황 버튼 옆 숫자: 진행 중인 작업 수 (답을 기다리는 게 있으면 노란색)."""
+        label = self.refs.get("activity_count")
+        if not label:
+            return
+        items = self.app.activity.items if self.app.activity else []
+        waiting = any(i.status == activity.WAITING for i in items)
+        label.configure(text=str(len(items)) if items else "",
+                        fg=theme.STATUS["warning"] if waiting else self.app.pal["text2"])
 
     # ── 보이기/숨기기 ─────────────────────────────────────
     def _create(self) -> None:
@@ -369,11 +444,15 @@ class Popup:
         winutil.round_corners(self.win)
         if self.app.settings["history_open"]:
             self.history.show()
+        if self.app.settings["activity_open"]:
+            self.activity.show()
+        self.app.refresh_activity()            # 머리글 버튼의 개수를 바로 맞춘다
         if not self.pinned:
             self.win.after(50, self.win.focus_force)
 
     def hide(self) -> None:
         self.history.hide()
+        self.activity.hide()
         if self.win and self.visible:
             self.win.withdraw()
             self.visible = False
@@ -429,6 +508,7 @@ class Popup:
             self._geom = (w, h, x, y)
             self.win.geometry(f"{w}x{h}+{x}+{y}")
         self.history.follow()
+        self.activity.follow()
 
     def _on_wheel(self, e) -> None:
         if not (self._scrolling and self.visible):
@@ -448,6 +528,7 @@ class Popup:
         if self.pinned:
             self.win.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
             self.history.follow()
+            self.activity.follow()
 
     def _drag_end(self, e) -> None:
         if self.pinned:
@@ -533,6 +614,34 @@ class Popup:
         b.bind("<Button-1>", lambda e: self.win.after_idle(command))
         return b
 
+    def _activity_button(self, parent) -> tk.Frame:
+        """작업 현황 버튼: 아이콘 옆에 진행 중인 작업 수를 붙인다."""
+        pal, px = self.app.pal, self.px
+        active = bool(self.app.settings["activity_open"])
+        box = tk.Frame(parent, bg=pal["bg"], cursor="hand2")
+        icon = tk.Label(box, text=GLYPH["activity"], font=(theme.ICON_FONT, 10), bg=pal["bg"],
+                        fg=pal["text"] if active else pal["text2"], padx=px(6), pady=px(4))
+        count = tk.Label(box, text="", font=(theme.FONT, 8, "bold"), bg=pal["bg"], padx=0)
+        icon.pack(side="left")
+        count.pack(side="left", padx=(0, px(4)))
+        parts = (box, icon, count)
+
+        def paint(bg):
+            for w in parts:
+                w.configure(bg=bg)
+
+        def leave(e):          # 아이콘과 숫자 사이를 오갈 때는 강조를 유지한다
+            if box.winfo_containing(e.x_root, e.y_root) not in parts:
+                paint(pal["bg"])
+        for w in parts:
+            w.bind("<Enter>", lambda e: paint(pal["hover"]))
+            w.bind("<Leave>", leave)
+            w.bind("<Button-1>", lambda e: self.win.after_idle(self.toggle_activity))
+        self.refs["activity_count"] = count
+        self.refs["btn_activity"] = icon
+        self.update_activity_count()
+        return box
+
     def _build(self, m: dict) -> None:
         pal = self.app.pal
         body = tk.Frame(self.frame, bg=pal["bg"])
@@ -561,8 +670,9 @@ class Popup:
                                     lambda: self.set_pinned(not self.pinned), self.pinned),
                                    (GLYPH["settings"], self.app.open_settings, False),
                                    (GLYPH["chart"], self.toggle_history, bool(self.app.settings["history_open"])),
+                                   (None, None, None),
                                    (GLYPH["refresh"], self.app.refresh, False)):
-            b = self._icon_button(head, glyph, cmd, active)
+            b = self._activity_button(head) if glyph is None else self._icon_button(head, glyph, cmd, active)
             b.pack(side="right")
             if cmd == self.toggle_history:
                 self.refs["btn_history"] = b
