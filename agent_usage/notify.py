@@ -11,6 +11,9 @@ from .store import JsonFile
 # 서비스가 알려 주는 초기화 시각은 조회할 때마다 조금씩 흔들린다(Claude는 1초 안쪽).
 # 이 정도 차이는 같은 한도 주기로 봐야 같은 부족 알림이 반복되지 않는다.
 CYCLE_TOLERANCE_S = 600
+# 같은 주기 안에서는 남은 양이 문턱보다 이만큼(%p) 넘게 회복해야 부족 알림을 다시 보낸다.
+# 문턱 근처에서 19% → 21% → 19%처럼 흔들려도 한 번만, 재설정권 등으로 크게 회복한 뒤에는 다시 알린다.
+REARM_MARGIN = 10
 
 
 def same_cycle(a, b) -> bool:
@@ -54,7 +57,7 @@ class Notifier:
                     self.send(t("n_low_title"), t("n_low", name=name, r=f"{remaining:.0f}")
                               + (t("n_low_when", when=when) if when else ""))
                     low_cycle = cycle
-            elif remaining > threshold:
+            elif remaining > threshold + REARM_MARGIN:
                 low_cycle = None
 
             self.state.data[key] = {"used": w.used_pct, "resets_at": w.resets_at, "low_cycle": low_cycle}

@@ -59,6 +59,21 @@ class NotifyTest(unittest.TestCase):
         n.check(Usage("test-cycle", "Test", windows=[Window("weekly", "W", 91, base + 7 * 86400)]))
         self.assertEqual(len(sent), 2)
 
+    def low_alerts(self, provider, used_values, resets_at):
+        sent = []
+        n = Notifier(settings(), lambda title, msg: sent.append(title))
+        for used in used_values:
+            n.check(Usage(provider, "Test", windows=[Window("weekly", "W", used, resets_at)]))
+        return sent.count(i18n.t("n_low_title"))
+
+    def test_low_alert_ignores_wobble_around_the_threshold(self):
+        # 문턱 20%: 남은 양 19% → 21% → 19% (같은 주기)
+        self.assertEqual(self.low_alerts("test-wobble", [81, 79, 81], time.time() + 86400), 1)
+
+    def test_low_alert_fires_again_after_a_real_recovery(self):
+        # 같은 주기라도 재설정권 등으로 40%까지 회복했다가 다시 19%가 되면 다시 알린다
+        self.assertEqual(self.low_alerts("test-refill", [81, 60, 81], time.time() + 86400), 2)
+
 
 class HistoryTest(unittest.TestCase):
     def setUp(self):
