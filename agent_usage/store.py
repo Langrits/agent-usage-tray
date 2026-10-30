@@ -20,6 +20,8 @@ from .models import Usage
 HOME_DATA_DIR = os.path.join(os.path.expanduser("~"), ".ai-usage-tray")
 DATA_DIR = os.environ.get("AGENT_USAGE_DATA") or HOME_DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
+
+
 def _ensure_schema(con: sqlite3.Connection) -> None:
     con.execute("""create table if not exists samples (
         ts real, provider text, window text, label text, used real, resets_at real)""")
