@@ -248,12 +248,15 @@ class ParseTest(unittest.TestCase):
         return u.reset_credits
 
     def test_claude_reset_credits_sum_and_earliest_end(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
         rc = self.claude_credits({"eligible": True, "grants": [
-            {"resets_left": 1, "ends_at": "2026-12-10T22:00:00+00:00"},
-            {"resets_left": 1, "ends_at": "2027-03-09T07:59:00+00:00"},
-            {"resets_left": 0, "ends_at": "2026-11-20T00:00:00+00:00"}]})          # 다 쓴 것은 빼고
+            {"resets_left": 1, "ends_at": day(21)},
+            {"resets_left": 1, "ends_at": day(110)},
+            {"resets_left": 0, "ends_at": day(1)},              # 다 쓴 것과
+            {"resets_left": 1, "ends_at": day(-1)}]})           # 이미 끝난 것은 빼고
         self.assertEqual(rc.count, 2)
-        self.assertEqual(rc.expires_at, claude.epoch("2026-12-10T22:00:00+00:00"))
+        self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
 
     def test_claude_reset_credits_none_left_and_not_eligible(self):
         self.assertEqual(self.claude_credits({"eligible": True, "grants": []}).count, 0)

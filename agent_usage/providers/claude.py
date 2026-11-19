@@ -209,6 +209,7 @@ def _reset_credits(ce) -> ResetCredits | None:
         return None
     left = [(as_number(g.get("resets_left")), epoch(g.get("ends_at")))
             for g in ce.get("grants") or [] if isinstance(g, dict)]
-    left = [(n, end) for n, end in left if n and n > 0]
+    now = time.time()
+    left = [(n, end) for n, end in left if n and n > 0 and (end is None or end > now)]   # 이미 끝난 것은 빼고
     ends = [end for _, end in left if end]
     return ResetCredits(int(sum(n for n, _ in left)), min(ends) if ends else None)

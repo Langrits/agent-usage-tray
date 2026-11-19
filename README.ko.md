@@ -28,7 +28,7 @@
 | Cursor | 이번 결제 주기(Auto / API 비율), 추가 사용 금액 | Cursor 앱 (`state.vscdb`) |
 | Gemini (실험적) | 모델별 하루 요청 한도 | Google 계정으로 로그인한 Gemini CLI (`~/.gemini/oauth_creds.json`) |
 
-Claude는 재설정권을 Claude Code에게만 사용량과 함께 알려 줘요. 그래서 이 프로그램은 Claude 사용량을 조회할 때 이 PC에 설치된 Claude Code 버전으로 Claude Code와 같은 방식으로 요청해요.
+Claude는 재설정권을 Claude Code에게만 사용량과 함께 알려 줘요. 그래서 이 프로그램은 Claude 사용량을 조회할 때 이 PC에 설치된 Claude Code 버전으로 Claude Code와 같은 방식으로 요청해요. Claude Code를 찾지 못하면 알려진 최근 버전을 써요.
 
 ## 설치
 

@@ -28,7 +28,7 @@ A small Windows tray app that shows how much of your **Claude, Codex, Cursor and
 | Cursor | This billing cycle (Auto / API split), on-demand spend | Cursor app (`state.vscdb`) |
 | Gemini (beta) | Daily per-model request limits | Gemini CLI with Google sign-in (`~/.gemini/oauth_creds.json`) |
 
-Claude only includes reset credits in its usage answer for Claude Code, so the app's Claude usage request identifies itself the way Claude Code does, with the Claude Code version installed on this PC.
+Claude only includes reset credits in its usage answer for Claude Code, so the app's Claude usage request identifies itself the way Claude Code does, with the Claude Code version installed on this PC (or a recent known version when Claude Code is not found).
 
 ## Install
 
