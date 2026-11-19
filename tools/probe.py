@@ -70,12 +70,14 @@ def probe_codex():
 
 
 def probe_claude():
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from agent_usage.providers.claude import USAGE_URL, _cli_version     # 앱과 같은 요청 (재설정권 포함)
     oauth = json.load(open(os.path.expanduser("~/.claude/.credentials.json"), encoding="utf-8"))["claudeAiOauth"]
     show("api.anthropic.com/api/oauth/usage",
-         requests.get("https://api.anthropic.com/api/oauth/usage",
+         requests.get(USAGE_URL,
                       headers={"Authorization": f"Bearer {oauth['accessToken']}",
                                "anthropic-beta": "oauth-2025-04-20",
-                               "User-Agent": "agent-usage-tray"}, timeout=15))
+                               "User-Agent": f"claude-cli/{_cli_version()} (external, cli)"}, timeout=15))
 
 
 if __name__ == "__main__":

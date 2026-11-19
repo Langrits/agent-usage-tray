@@ -40,6 +40,7 @@ def fake_usages(ids, opts):
             Window("five_hour", t("w_5h"), 18, now + 3 * 3600 + 120),
             Window("seven_day", t("w_week"), 27, now + 4.9 * 86400),
             Window("seven_day_fable", t("w_week_scoped", name="Fable"), 0, now + 4.9 * 86400)],
+            reset_credits=ResetCredits(2, now + 22 * 86400),
             extra=[t("week_breakdown", rows="Claude Code 100%")], source="API"),
         "codex": Usage("codex", "Codex", "Pro", [Window("weekly", t("w_week"), 14, now + 6 * 86400)],
                        reset_credits=ResetCredits(1, now + 12 * 86400), source="API"),

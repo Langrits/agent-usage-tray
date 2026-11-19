@@ -23,12 +23,12 @@ A small Windows tray app that shows how much of your **Claude, Codex, Cursor and
 
 | Service | What it shows | Sign-in it uses |
 |---|---|---|
-| Claude (Pro / Max) | 5-hour, weekly, and per-model weekly limits | Claude Code CLI (`~/.claude/.credentials.json`) |
+| Claude (Pro / Max) | 5-hour, weekly, and per-model weekly limits, reset credits | Claude Code CLI (`~/.claude/.credentials.json`) |
 | Codex (ChatGPT plans) | 5-hour / weekly limits, reset credits, credit balance | Codex app or CLI (`~/.codex/auth.json`); falls back to Codex session logs |
 | Cursor | This billing cycle (Auto / API split), on-demand spend | Cursor app (`state.vscdb`) |
 | Gemini (beta) | Daily per-model request limits | Gemini CLI with Google sign-in (`~/.gemini/oauth_creds.json`) |
 
-Claude reset credits are not shown: the endpoint this app uses does not report them (as of October 2026).
+Claude only includes reset credits in its usage answer for Claude Code, so the app's Claude usage request identifies itself the way Claude Code does, with the Claude Code version installed on this PC.
 
 ## Install
 
