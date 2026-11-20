@@ -279,15 +279,99 @@ class ParseTest(unittest.TestCase):
         os.makedirs(os.path.join(home, ".local", "bin"))
         exe = os.path.join(home, ".local", "bin", "claude.exe")
         open(exe, "w").close()
-        with mock.patch.object(claude, "HOME", home), mock.patch.object(claude.shutil, "which", lambda name: None):
+        with mock.patch.object(claude, "HOME", home), mock.patch.dict(os.environ, {"PATH": ""}):
             u = claude._needs_login(Usage("claude", "Claude"), "expired")
         self.assertEqual(u.login_cmd, [exe, "auth", "login", "--claudeai"])
         self.assertEqual(u.hint, i18n.t("hint_claude_relogin"))
-        with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), mock.patch.object(claude.shutil, "which", lambda n: None), \
-                mock.patch.dict(os.environ, {"APPDATA": tempfile.mkdtemp()}):
+        with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), \
+                mock.patch.dict(os.environ, {"PATH": "", "APPDATA": tempfile.mkdtemp()}):
             u = claude._needs_login(Usage("claude", "Claude"), "expired")      # Claude Code가 없으면 버튼 없이 안내만
         self.assertIsNone(u.login_cmd)
         self.assertEqual(u.hint, i18n.t("hint_claude_login"))
+
+    def test_claude_login_command_ignores_current_and_relative_folders(self):
+        cwd, good = tempfile.mkdtemp(), tempfile.mkdtemp()
+        for d in (cwd, good):
+            open(os.path.join(d, "claude.exe"), "w").close()
+        old = os.getcwd()
+        os.chdir(cwd)
+        try:
+            with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), \
+                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join([".", "bin", good]), "APPDATA": ""}):
+                cmd = claude._login_cmd()
+        finally:
+            os.chdir(old)
+        self.assertEqual(cmd[0], os.path.join(good, "claude.exe"))
+
+    def test_claude_button_also_when_auto_renewal_is_off(self):
+        def expired(opts):
+            raise claude.LoginProblem(i18n.t("err_expired", title="Claude"), i18n.t("hint_claude_run"))
+        with mock.patch.object(claude, "_access_token", expired), \
+                mock.patch.object(claude, "_login_cmd", lambda: ["claude.exe", "auth", "login", "--claudeai"]):
+            u = claude.fetch(Options(auto_refresh_login=False))
+        self.assertEqual((u.login_cmd is not None, u.hint), (True, i18n.t("hint_claude_relogin")))
+        with mock.patch.object(claude, "_access_token", expired), mock.patch.object(claude, "_login_cmd", lambda: None):
+            u = claude.fetch(Options(auto_refresh_login=False))
+        self.assertEqual(u.hint, i18n.t("hint_claude_run"))                   # 버튼이 없으면 원래 안내
+
+    def test_codex_reset_details_only_read_and_never_lose_the_count(self):
+        class Resp:
+            def __init__(self, data, status=200):
+                self.data, self.status_code = data, status
+
+            def json(self):
+                return self.data
+
+            def raise_for_status(self):
+                pass
+        usage_answer = {"rate_limit": {"primary_window": {"used_percent": 10, "limit_window_seconds": 604800}},
+                        "rate_limit_reset_credits": {"available_count": 2}}
+        for details in ([1, 2], None, {"credits": 1}, ValueError("bad json")):
+            calls = []
+
+            def get(url, **kw):
+                calls.append(url)
+                if url == codex.USAGE_URL:
+                    return Resp(usage_answer)
+                if isinstance(details, Exception):
+                    raise details
+                return Resp(details)
+            with mock.patch.object(codex, "read_json", lambda p: {"tokens": {"access_token": "x", "account_id": "y"}}), \
+                    mock.patch.object(codex.requests, "get", get), \
+                    mock.patch.object(codex.requests, "post", lambda *a, **k: self.fail("must not POST")):
+                u = codex.fetch(Options())
+            self.assertEqual((u.source, u.reset_credits.count, u.reset_credits.expires_at),
+                             (i18n.t("source_api"), 2, None), details)
+            self.assertEqual(calls, [codex.USAGE_URL, codex.RESET_CREDITS_URL])
+            self.assertFalse(any("consume" in c for c in calls))
+
+    def test_login_button_runs_once_and_refreshes_when_the_window_closes(self):
+        import types
+
+        from agent_usage.app import App
+        posted, started = [], []
+
+        class Proc:
+            def poll(self):
+                return None
+
+            def wait(self):
+                return 0
+        stub = types.SimpleNamespace(
+            latest={"claude": Usage("claude", "Claude", login_cmd=["claude.exe", "auth", "login", "--claudeai"])},
+            _login=None, popup=types.SimpleNamespace(render_if_visible=lambda: None),
+            post=lambda *m: posted.append(m), refresh=lambda: posted.append(("refreshed",)))
+        stub.logging_in = lambda pid: App.logging_in(stub, pid)
+        with mock.patch("agent_usage.app.subprocess.Popen", lambda cmd, **kw: started.append(cmd) or Proc()), \
+                mock.patch("agent_usage.app.threading.Thread",
+                           lambda target, daemon: types.SimpleNamespace(start=target)):
+            App.start_login(stub, "claude")
+            App.start_login(stub, "claude")          # 두 번 눌러도 창은 하나 (첫 창이 아직 처리 전)
+        self.assertEqual(started, [["claude.exe", "auth", "login", "--claudeai"]])
+        self.assertEqual(posted, [("login_done", "claude")])
+        App._handle(stub, "login_done", "claude")
+        self.assertIsNone(stub._login)
+        self.assertEqual(posted[-1], ("refreshed",))
 
     def test_codex_credit_expiry_uses_available_unexpired_credits(self):
         from datetime import datetime, timezone

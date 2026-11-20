@@ -110,9 +110,12 @@ def _add_extra_limit(usage: Usage, extra: dict) -> None:
                                         used, w.get("reset_at")))
 
 
-def credit_expiry(d: dict, now: float) -> float | None:
-    """재설정권 상세 응답에서 쓸 수 있는(available) 것 중 가장 먼저 소멸하는 시각."""
-    ends = [epoch(c.get("expires_at")) for c in d.get("credits") or []
+def credit_expiry(d, now: float) -> float | None:
+    """재설정권 상세 응답에서 쓸 수 있는(available) 것 중 가장 먼저 소멸하는 시각. 모양이 다르면 None."""
+    credits = d.get("credits") if isinstance(d, dict) else None
+    if not isinstance(credits, list):
+        return None
+    ends = [epoch(c.get("expires_at")) for c in credits
             if isinstance(c, dict) and c.get("status") == "available"]
     ends = [e for e in ends if e and e > now]
     return min(ends) if ends else None

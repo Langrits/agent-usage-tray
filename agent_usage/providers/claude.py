@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import time
 
 import requests
@@ -122,8 +121,8 @@ def fetch(opts: Options) -> Usage:
     try:
         token, oauth = _access_token(opts)
     except LoginProblem as p:
-        if p.hint == t("hint_claude_login"):
-            return _needs_login(usage, p.error)
+        if p.hint in (t("hint_claude_login"), t("hint_claude_run")):
+            return _needs_login(usage, p.error, p.hint)
         return usage.fail(p.error, p.hint)
 
     usage.plan = _plan(oauth)
@@ -142,9 +141,10 @@ def fetch(opts: Options) -> Usage:
     return usage
 
 
-def _needs_login(usage: Usage, error: str) -> Usage:
-    """다시 로그인해야 할 때: Claude Code가 있으면 카드의 '다시 로그인' 버튼이 그 로그인 명령을 실행한다."""
-    usage.fail(error, t("hint_claude_login"))
+def _needs_login(usage: Usage, error: str, hint: str | None = None) -> Usage:
+    """다시 로그인해야 할 때: Claude Code가 있으면 카드의 '다시 로그인' 버튼이 그 로그인 명령을 실행한다.
+    (자동 갱신을 꺼 둔 경우에도 버튼으로 직접 로그인할 수 있다.) Claude Code가 없으면 원래 안내만 보인다."""
+    usage.fail(error, hint or t("hint_claude_login"))
     usage.login_cmd = _login_cmd()
     if usage.login_cmd:
         usage.hint = t("hint_claude_relogin")
@@ -153,11 +153,22 @@ def _needs_login(usage: Usage, error: str) -> Usage:
 
 def _login_cmd() -> list[str] | None:
     """Claude Code의 구독 로그인 명령 (로그인 방법을 고르지 않고 브라우저 승인 화면으로 바로 간다)."""
-    for exe in (shutil.which("claude"), os.path.join(HOME, ".local", "bin", "claude.exe"),
-                os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.cmd")):
-        if exe and os.path.isfile(exe):
+    for exe in _claude_candidates():
+        if os.path.isabs(exe) and os.path.isfile(exe):
             return [exe, "auth", "login", "--claudeai"]
     return None
+
+
+def _claude_candidates():
+    """PATH의 절대 경로 폴더, 기본 설치 위치, npm 설치 위치 순서. 현재 폴더는 보지 않는다
+    (shutil.which는 Windows에서 현재 폴더를 먼저 찾을 수 있어 쓰지 않는다)."""
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if d and os.path.isabs(d):
+            for name in ("claude.exe", "claude.cmd"):
+                yield os.path.join(d, name)
+    yield os.path.join(HOME, ".local", "bin", "claude.exe")
+    if os.environ.get("APPDATA"):
+        yield os.path.join(os.environ["APPDATA"], "npm", "claude.cmd")
 
 
 def parse(usage: Usage, d: dict) -> None:
