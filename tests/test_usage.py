@@ -281,6 +281,36 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(round(rc.kinds[0][2]), round(claude.epoch(day(21))))          # 같은 종류는 빠른 소멸일
         self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
 
+    def test_claude_reset_kind_names_and_odd_fields(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
+        u = Usage("claude", "Claude")
+        claude.parse(u, {"limits": [{"kind": "session", "percent": 10, "resets_at": None},
+                                    {"kind": "weekly_scoped", "scope": "unknown"},          # 모양이 다른 항목
+                                    {"kind": "weekly_scoped", "scope": {"model": None}}],
+                         "cedar_ember": {"eligible": True, "grants": [
+                             {"label": None, "resets_left": 1, "ends_at": day(9), "clears": ["five_hour"]},
+                             {"label": "x", "resets_left": 1, "ends_at": day(5), "clears": ["five_hour"]},
+                             {"label": "y", "resets_left": 1, "ends_at": day(40), "clears": "weekly"},
+                             {"label": "z", "resets_left": 0.5, "ends_at": day(1), "clears": ["five_hour", "seven_day"]},
+                             {"label": "w", "resets_left": "2", "ends_at": day(1), "clears": ["five_hour", "seven_day"]},
+                             "not a grant"]}})
+        rc = u.reset_credits
+        self.assertEqual([(k, n) for k, n, _ in rc.kinds], [(i18n.t("rc_kind_5h"), 2), (i18n.t("rc_kind_other"), 1)])
+        self.assertEqual(round(rc.kinds[0][2]), round(claude.epoch(day(5))))       # 같은 종류는 더 빠른 소멸일
+        self.assertEqual((rc.count, round(rc.expires_at)), (3, round(claude.epoch(day(5)))))
+
+    def test_card_lines_split_only_when_kinds_differ(self):
+        from agent_usage.app import reset_lines
+        from agent_usage.models import ResetCredits
+        now = time.time()
+        one = reset_lines(ResetCredits(3, now + 86400, [(i18n.t("rc_kind_full"), 3, now + 86400)]))
+        self.assertEqual(len(one), 1)
+        self.assertTrue(one[0][0].startswith(i18n.t("rc_count", n=3)))
+        two = reset_lines(ResetCredits(2, now + 86400, [(i18n.t("rc_kind_full"), 1, now + 86400), ("Fable", 1, None)]))
+        self.assertEqual([text for text, _ in two][1], i18n.t("rc_kind_count", kind="Fable", n=1))
+        self.assertEqual(reset_lines(ResetCredits(0)), [(i18n.t("rc_none"), False)])
+
     def test_claude_reset_credits_none_left_and_not_eligible(self):
         self.assertEqual(self.claude_credits({"eligible": True, "grants": []}).count, 0)
         self.assertIsNone(self.claude_credits({"eligible": False, "ineligible_reason": "surface", "grants": []}))

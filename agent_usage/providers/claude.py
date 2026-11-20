@@ -196,9 +196,19 @@ def parse(usage: Usage, d: dict) -> None:
         usage.extra.append(t("week_breakdown",
                              rows=" · ".join(f"{r['display_name']} {r['percent']:.0f}%" for r in rows)))
 
-    models = [((lim.get("scope") or {}).get("model") or {}).get("display_name")
-              for lim in d.get("limits") or [] if isinstance(lim, dict)]
-    usage.reset_credits = _reset_credits(d.get("cedar_ember"), [m for m in models if isinstance(m, str) and m])
+    usage.reset_credits = _reset_credits(d.get("cedar_ember"), _scoped_models(d.get("limits")))
+
+
+def _scoped_models(limits) -> list[str]:
+    """모델별 한도의 모델 이름 (Fable 등). 모양이 다른 항목은 건너뛴다."""
+    out = []
+    for lim in limits if isinstance(limits, list) else []:
+        scope = lim.get("scope") if isinstance(lim, dict) else None
+        model = scope.get("model") if isinstance(scope, dict) else None
+        name = model.get("display_name") if isinstance(model, dict) else None
+        if isinstance(name, str) and name:
+            out.append(name)
+    return out
 
 
 def _parse_limits(usage: Usage, limits: list) -> None:
@@ -254,7 +264,7 @@ def _reset_credits(ce, models=()) -> ResetCredits | None:
         if not isinstance(g, dict):
             continue
         n, end = as_number(g.get("resets_left")), epoch(g.get("ends_at"))
-        if not n or n <= 0 or (end is not None and end <= now):     # 다 썼거나 이미 끝난 것은 빼고
+        if n is None or n < 1 or n != int(n) or (end is not None and end <= now):   # 다 썼거나, 이상한 값이거나, 끝난 것은 빼고
             continue
         kind = kinds.setdefault(_grant_kind(g, models), [0, None])
         kind[0] += int(n)

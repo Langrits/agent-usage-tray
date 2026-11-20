@@ -49,6 +49,16 @@ def tray_image(text: str, color: str) -> Image.Image:
     return img
 
 
+def reset_lines(rc) -> list[tuple[str, bool]]:
+    """카드의 재설정권 줄 [(글자, 굵게)]. 종류가 여럿이면 종류마다 한 줄 (예: 전체 1개, Fable 1개)."""
+    expires = lambda ts: t("rc_expires", clock=fmt.clock(ts)) if ts else ""
+    if not rc.count:
+        return [(t("rc_none"), False)]
+    if len(rc.kinds) > 1:
+        return [(t("rc_kind_count", kind=k, n=n) + expires(end), True) for k, n, end in rc.kinds]
+    return [(t("rc_count", n=rc.count) + expires(rc.expires_at), True)]
+
+
 class App:
     def __init__(self):
         winutil.enable_dpi_awareness()
@@ -621,15 +631,8 @@ class Popup:
                     card["rows"].append({"key": w.key, "label": w.label, "note": w.note,
                                          "pct": t("pct_left", pct=f"{r:.0f}"), "remaining": r,
                                          "color": theme.STATUS[theme.level(r, threshold)], "when": when})
-                rc = good.reset_credits
-                if rc is not None:
-                    expires = lambda ts: t("rc_expires", clock=fmt.clock(ts)) if ts else ""
-                    if not rc.count:
-                        card["reset"] = [(t("rc_none"), False)]
-                    elif len(rc.kinds) > 1:         # 종류가 여럿이면 한 줄씩 (예: 전체 1개, Fable 1개)
-                        card["reset"] = [(t("rc_kind_count", kind=k, n=n) + expires(end), True) for k, n, end in rc.kinds]
-                    else:
-                        card["reset"] = [(t("rc_count", n=rc.count) + expires(rc.expires_at), True)]
+                if good.reset_credits is not None:
+                    card["reset"] = reset_lines(good.reset_credits)
                 card["extras"] = list(good.extra)
             if latest and latest.error:
                 card["problem"] = latest.error + (t("last_success", ago=fmt.ago(good.data_at)) if good else "")
