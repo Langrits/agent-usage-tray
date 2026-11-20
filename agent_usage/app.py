@@ -483,7 +483,7 @@ class Popup:
         self.win.attributes("-topmost", True)
         self.win.configure(bg=pal["border"])
         self.win.bind("<Escape>", lambda e: self.hide())
-        self.win.bind("<FocusOut>", lambda e: self.win.after(150, self._check_focus))
+        self.win.bind("<FocusOut>", lambda e: self.app.root.after(150, self._check_focus))  # 앱 기본 창에 예약: 테마 변경으로 이 창이 사라져도 확인은 그대로 돈다
         outer = tk.Frame(self.win, bg=pal["bg"])
         outer.pack(fill="both", expand=True, padx=1, pady=1)
         # 화면보다 길어지면 스크롤된다 (카드가 많거나 화면 배율이 클 때)

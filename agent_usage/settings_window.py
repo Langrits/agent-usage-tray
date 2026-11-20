@@ -260,6 +260,8 @@ class SettingsWindow:
 
     # ── 화면 ─────────────────────────────────────────────
     def build(self) -> None:
+        old = getattr(self, "canvas", None)
+        scrolled = old.yview()[0] if old is not None and old.winfo_exists() else 0.0     # 다시 그려도 보던 곳 유지
         for w in self.win.winfo_children():
             w.destroy()
         app, c, px, s = self.app, self.c, self.px, self.app.settings
@@ -338,6 +340,8 @@ class SettingsWindow:
         if REPO_URL:
             self._link(foot, "GitHub", lambda: webbrowser.open(REPO_URL)).pack(side="right", padx=(0, px(14)))
         self._fit()
+        if self.scrolling and scrolled:
+            self.canvas.yview_moveto(scrolled)
 
     def _fit(self) -> None:
         """내용 높이에 맞추되, 작업 영역보다 길면 그만큼만 열고 스크롤한다."""
