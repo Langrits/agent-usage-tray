@@ -274,6 +274,32 @@ class ParseTest(unittest.TestCase):
         with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), mock.patch.dict(os.environ, {"APPDATA": appdata}):
             self.assertEqual(claude._cli_version(), claude.CLI_VERSION_FALLBACK)
 
+    def test_claude_login_button_runs_the_cli_login(self):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, ".local", "bin"))
+        exe = os.path.join(home, ".local", "bin", "claude.exe")
+        open(exe, "w").close()
+        with mock.patch.object(claude, "HOME", home), mock.patch.object(claude.shutil, "which", lambda name: None):
+            u = claude._needs_login(Usage("claude", "Claude"), "expired")
+        self.assertEqual(u.login_cmd, [exe, "auth", "login", "--claudeai"])
+        self.assertEqual(u.hint, i18n.t("hint_claude_relogin"))
+        with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), mock.patch.object(claude.shutil, "which", lambda n: None), \
+                mock.patch.dict(os.environ, {"APPDATA": tempfile.mkdtemp()}):
+            u = claude._needs_login(Usage("claude", "Claude"), "expired")      # Claude Code가 없으면 버튼 없이 안내만
+        self.assertIsNone(u.login_cmd)
+        self.assertEqual(u.hint, i18n.t("hint_claude_login"))
+
+    def test_codex_credit_expiry_uses_available_unexpired_credits(self):
+        from datetime import datetime, timezone
+        now = time.time()
+        iso = lambda n: datetime.fromtimestamp(now + n * 86400, timezone.utc).isoformat()
+        d = {"credits": [{"status": "available", "expires_at": iso(12)},
+                         {"status": "available", "expires_at": iso(30)},
+                         {"status": "redeemed", "expires_at": iso(2)},          # 이미 쓴 것과
+                         {"status": "available", "expires_at": iso(-1)}]}       # 이미 소멸한 것은 빼고
+        self.assertEqual(round(codex.credit_expiry(d, now)), round(now + 12 * 86400))
+        self.assertIsNone(codex.credit_expiry({"credits": []}, now))
+
     def test_cursor_on_demand_only_is_not_an_error(self):
         def on_demand_only(opts):
             u = Usage("cursor", "Cursor")

@@ -49,7 +49,7 @@ To start it with Windows, open **Settings** and check **Start with Windows**.
 
 The app only reads sign-ins that already exist on your PC. Sign in once with each tool you use:
 
-- **Claude**: install [Claude Code](https://code.claude.com/docs) (`irm https://claude.ai/install.ps1 | iex` in PowerShell), run `claude`, choose **Claude account with subscription**, and sign in. The Claude desktop app's sign-in can't be used: it is encrypted, and claude.ai blocks non-browser requests.
+- **Claude**: install [Claude Code](https://code.claude.com/docs) (`irm https://claude.ai/install.ps1 | iex` in PowerShell), run `claude`, choose **Claude account with subscription**, and sign in. The Claude desktop app's sign-in can't be used: it is encrypted, and claude.ai blocks non-browser requests. The sign-in is renewed every 8 hours, but after about 4 weeks you have to sign in again: click **Sign in again** on the Claude card and approve in your browser (it runs Claude Code's `claude auth login --claudeai` for you).
 - **Codex**: sign in to the Codex app or CLI with your ChatGPT account.
 - **Cursor**: sign in to the Cursor app.
 - **Gemini (beta)**: install [Gemini CLI](https://github.com/google-gemini/gemini-cli), run `gemini`, and sign in with Google.

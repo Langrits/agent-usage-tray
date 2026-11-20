@@ -49,7 +49,7 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 
 이 프로그램은 PC에 이미 있는 로그인만 읽어요. 쓰는 도구마다 한 번씩 로그인해 두세요.
 
-- **Claude**: [Claude Code](https://code.claude.com/docs)를 설치하세요(PowerShell에서 `irm https://claude.ai/install.ps1 | iex`). 그다음 `claude`를 실행하고 **Claude account with subscription**을 골라 로그인하세요. Claude 데스크톱 앱의 로그인은 쓸 수 없어요. 암호화돼 있고, claude.ai가 브라우저가 아닌 접속을 막기 때문이에요.
+- **Claude**: [Claude Code](https://code.claude.com/docs)를 설치하세요(PowerShell에서 `irm https://claude.ai/install.ps1 | iex`). 그다음 `claude`를 실행하고 **Claude account with subscription**을 골라 로그인하세요. Claude 데스크톱 앱의 로그인은 쓸 수 없어요. 암호화돼 있고, claude.ai가 브라우저가 아닌 접속을 막기 때문이에요. 로그인은 8시간마다 자동으로 갱신되지만 약 4주가 지나면 다시 로그인해야 해요. 그때는 Claude 카드의 **다시 로그인** 버튼을 누르고 브라우저에서 승인하면 돼요(Claude Code의 `claude auth login --claudeai`를 대신 실행해요).
 - **Codex**: Codex 앱이나 CLI에 ChatGPT 계정으로 로그인하세요.
 - **Cursor**: Cursor 앱에 로그인하세요.
 - **Gemini (실험적)**: [Gemini CLI](https://github.com/google-gemini/gemini-cli)를 설치하고 `gemini`를 실행해 Google 계정으로 로그인하세요.

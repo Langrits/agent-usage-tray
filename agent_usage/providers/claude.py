@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import time
 
 import requests
@@ -121,6 +122,8 @@ def fetch(opts: Options) -> Usage:
     try:
         token, oauth = _access_token(opts)
     except LoginProblem as p:
+        if p.hint == t("hint_claude_login"):
+            return _needs_login(usage, p.error)
         return usage.fail(p.error, p.hint)
 
     usage.plan = _plan(oauth)
@@ -131,12 +134,30 @@ def fetch(opts: Options) -> Usage:
         "User-Agent": f"claude-cli/{_cli_version()} (external, cli)",    # 재설정권을 받으려면 Claude Code로 보여야 한다
     })
     if resp.status_code == 401:
-        return usage.fail(t("err_expired", title="Claude"), t("hint_claude_login"))
+        return _needs_login(usage, t("err_expired", title="Claude"))
     if resp.status_code == 429:
         return usage.fail(t("err_rate_limited"), t("hint_rate_limited"))
     resp.raise_for_status()
     parse(usage, resp.json())
     return usage
+
+
+def _needs_login(usage: Usage, error: str) -> Usage:
+    """다시 로그인해야 할 때: Claude Code가 있으면 카드의 '다시 로그인' 버튼이 그 로그인 명령을 실행한다."""
+    usage.fail(error, t("hint_claude_login"))
+    usage.login_cmd = _login_cmd()
+    if usage.login_cmd:
+        usage.hint = t("hint_claude_relogin")
+    return usage
+
+
+def _login_cmd() -> list[str] | None:
+    """Claude Code의 구독 로그인 명령 (로그인 방법을 고르지 않고 브라우저 승인 화면으로 바로 간다)."""
+    for exe in (shutil.which("claude"), os.path.join(HOME, ".local", "bin", "claude.exe"),
+                os.path.join(os.environ.get("APPDATA", ""), "npm", "claude.cmd")):
+        if exe and os.path.isfile(exe):
+            return [exe, "auth", "login", "--claudeai"]
+    return None
 
 
 def parse(usage: Usage, d: dict) -> None:
