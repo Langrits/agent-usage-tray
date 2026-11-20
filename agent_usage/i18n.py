@@ -27,6 +27,7 @@ KO = {
     "ago_now": "방금", "ago_m": "{m}분 전", "ago_h": "{h}시간 전",
     # 재설정권·부가 정보
     "rc_count": "재설정권 {n}개", "rc_expires": " · {clock} 소멸", "rc_none": "재설정권 없음",
+    "rc_kind_count": "{kind} 재설정권 {n}개", "rc_kind_full": "전체", "rc_kind_5h": "5시간", "rc_kind_other": "기타",
     "extra_usage": "추가 사용: ${used}", "extra_usage_limit": "추가 사용: ${used} / ${limit}",
     "week_breakdown": "이번 주 사용처: {rows}",
     "credits_unlimited": "크레딧: 무제한", "credits_balance": "크레딧 잔액: {b}", "limit_reached": "현재 한도 도달",
@@ -110,6 +111,7 @@ EN = {
     "today": "today {hm}", "date": "{wd} {m}/{d} {hm}", "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     "ago_now": "just now", "ago_m": "{m}m ago", "ago_h": "{h}h ago",
     "rc_count": "Reset credits: {n}", "rc_expires": " · expires {clock}", "rc_none": "No reset credits",
+    "rc_kind_count": "{kind} reset credits: {n}", "rc_kind_full": "Full", "rc_kind_5h": "5-hour", "rc_kind_other": "Other",
     "extra_usage": "Extra usage: ${used}", "extra_usage_limit": "Extra usage: ${used} / ${limit}",
     "week_breakdown": "This week: {rows}",
     "credits_unlimited": "Credits: unlimited", "credits_balance": "Credit balance: {b}", "limit_reached": "Limit reached",

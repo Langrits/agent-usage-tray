@@ -261,6 +261,26 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(rc.count, 2)
         self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
 
+    def test_claude_reset_credits_by_kind(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
+        u = Usage("claude", "Claude")
+        claude.parse(u, {"limits": [{"kind": "session", "percent": 10, "resets_at": None},
+                                    {"kind": "weekly_scoped", "percent": 0, "resets_at": None,
+                                     "scope": {"model": {"display_name": "Fable"}}}],
+                         "cedar_ember": {"eligible": True, "grants": [
+                             {"label": "One full limit reset", "resets_left": 1, "ends_at": day(21),
+                              "clears": ["five_hour", "seven_day"]},
+                             {"label": "New model launch: one Fable reset", "resets_left": 1, "ends_at": day(110),
+                              "clears": ["five_hour"]},
+                             {"label": "Another full reset", "resets_left": 2, "ends_at": day(30),
+                              "clears": ["five_hour", "seven_day"]}]}})
+        rc = u.reset_credits
+        self.assertEqual(rc.count, 4)
+        self.assertEqual([(k, n) for k, n, _ in rc.kinds], [(i18n.t("rc_kind_full"), 3), ("Fable", 1)])
+        self.assertEqual(round(rc.kinds[0][2]), round(claude.epoch(day(21))))          # 같은 종류는 빠른 소멸일
+        self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
+
     def test_claude_reset_credits_none_left_and_not_eligible(self):
         self.assertEqual(self.claude_credits({"eligible": True, "grants": []}).count, 0)
         self.assertIsNone(self.claude_credits({"eligible": False, "ineligible_reason": "surface", "grants": []}))

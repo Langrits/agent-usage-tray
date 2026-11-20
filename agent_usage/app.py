@@ -610,7 +610,7 @@ class Popup:
             card = {"id": pid, "title": mod.TITLE, "tag": t("experimental") if mod.EXPERIMENTAL else "",
                     "plan": (shown.plan or "") if shown else "",
                     "meta": f"{good.source} · {fmt.ago(good.data_at)}" if good else "",
-                    "loading": latest is None, "rows": [], "reset": None, "extras": [],
+                    "loading": latest is None, "rows": [], "reset": [], "extras": [],
                     "problem": None, "hint": "", "login": ""}
             if good:
                 for w in good.windows:
@@ -623,9 +623,13 @@ class Popup:
                                          "color": theme.STATUS[theme.level(r, threshold)], "when": when})
                 rc = good.reset_credits
                 if rc is not None:
-                    card["reset"] = ((t("rc_count", n=rc.count)
-                                      + (t("rc_expires", clock=fmt.clock(rc.expires_at)) if rc.expires_at else ""), True)
-                                     if rc.count else (t("rc_none"), False))
+                    expires = lambda ts: t("rc_expires", clock=fmt.clock(ts)) if ts else ""
+                    if not rc.count:
+                        card["reset"] = [(t("rc_none"), False)]
+                    elif len(rc.kinds) > 1:         # 종류가 여럿이면 한 줄씩 (예: 전체 1개, Fable 1개)
+                        card["reset"] = [(t("rc_kind_count", kind=k, n=n) + expires(end), True) for k, n, end in rc.kinds]
+                    else:
+                        card["reset"] = [(t("rc_count", n=rc.count) + expires(rc.expires_at), True)]
                 card["extras"] = list(good.extra)
             if latest and latest.error:
                 card["problem"] = latest.error + (t("last_success", ago=fmt.ago(good.data_at)) if good else "")
@@ -645,7 +649,7 @@ class Popup:
         return (self.pinned, i18n.lang(), tuple(
             (c["id"], c["loading"], bool(c["plan"]), bool(c["meta"]),
              tuple((r["key"], bool(r["note"]), bool(r["when"])) for r in c["rows"]),
-             c["reset"][1] if c["reset"] else None, len(c["extras"]), c["problem"] is not None, bool(c["hint"]),
+             tuple(bold for _, bold in c["reset"]), len(c["extras"]), c["problem"] is not None, bool(c["hint"]),
              bool(c["login"]))
             for c in m["cards"]))
 
@@ -773,10 +777,11 @@ class Popup:
             return refs
         for row in c["rows"]:
             refs["rows"][row["key"]] = self._build_row(inner, row)
-        if c["reset"]:
-            text, bold = c["reset"]
-            refs["reset"] = self._label(inner, text, 9, "text" if bold else "muted", bold=bold)
-            refs["reset"].pack(anchor="w", pady=(px(8), 0))
+        refs["reset"] = []
+        for i, (text, bold) in enumerate(c["reset"]):
+            lbl = self._label(inner, text, 9, "text" if bold else "muted", bold=bold)
+            lbl.pack(anchor="w", pady=(px(2) if i else px(8), 0))
+            refs["reset"].append(lbl)
         for line in c["extras"]:
             lbl = self._label(inner, line, 8, "text2", wraplength=px(self.WIDTH - 60), justify="left")
             lbl.pack(anchor="w", pady=(px(3), 0))
@@ -864,8 +869,8 @@ class Popup:
                 if r["bar"].value != value:
                     r["bar"].value = value
                     self._draw_bar(r["bar"])
-            if c["reset"]:
-                self._set(refs.get("reset"), c["reset"][0])
+            for lbl, (text, _) in zip(refs.get("reset", []), c["reset"]):
+                self._set(lbl, text)
             for label, text in zip(refs["extras"], c["extras"]):
                 self._set(label, text)
             if c["problem"] is not None:
