@@ -562,6 +562,20 @@ class WindowsTest(unittest.TestCase):
         self.assertLess(left, right)
         self.assertLess(top, bottom)
 
+    def test_autostart_shows_on_only_for_this_program(self):
+        class Key:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+        cmd = winutil._autostart_command()
+        with mock.patch.object(winutil.winreg, "OpenKey", lambda *a, **k: Key()):
+            with mock.patch.object(winutil.winreg, "QueryValueEx", lambda key, name: (cmd.upper(), 1)):
+                self.assertTrue(winutil.autostart_enabled())                  # 같은 경로 (대소문자만 다름)
+            with mock.patch.object(winutil.winreg, "QueryValueEx", lambda key, name: ('"D:/old/AI Usage Tray.exe"', 1)):
+                self.assertFalse(winutil.autostart_enabled())                 # 옮기기 전 경로·다른 판
+
     def test_autostart_runs_the_exe_when_frozen(self):
         exe = r"C:\Apps\AI Usage Tray\AI Usage Tray.exe"
         with mock.patch.object(winutil.sys, "frozen", True, create=True), \

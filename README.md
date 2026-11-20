@@ -38,7 +38,7 @@ Claude only includes reset credits in its usage answer for Claude Code, so the a
 2. Unzip it anywhere (for example your Documents folder) and run **AI Usage Tray.exe** in the `AI Usage Tray` folder.
 3. If "Windows protected your PC" appears the first time, click **More info → Run anyway**. The app is not code-signed, so Windows shows this warning. Checking **Unblock** in the zip file's Properties before unzipping avoids it.
 
-If you move the folder later, turn **Start with Windows** off and on again in Settings (the program's location changed).
+If you move the folder later, **Start with Windows** shows as off in Settings; turn it on again (the program's location changed).
 
 ### From source (Python)
 
