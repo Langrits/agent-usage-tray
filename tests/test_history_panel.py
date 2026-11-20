@@ -1,5 +1,10 @@
 """사용 기록 패널의 위치 계산과 데이터 묶기 테스트 (창은 띄우지 않는다)."""
+import os
+import sys
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _testdata  # noqa: E402,F401  실제 데이터 폴더를 쓰지 않도록 store 보다 먼저
 
 from agent_usage.history_panel import (chart_height, fit_legend, group_series, panel_x, stack_height,
                                        uniform_height)

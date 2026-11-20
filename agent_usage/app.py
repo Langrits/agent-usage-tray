@@ -49,6 +49,16 @@ def tray_image(text: str, color: str) -> Image.Image:
     return img
 
 
+def reset_lines(rc) -> list[tuple[str, bool]]:
+    """카드의 재설정권 줄 [(글자, 굵게)]. 종류가 여럿이면 종류마다 한 줄 (예: 전체 1개, Fable 1개)."""
+    expires = lambda ts: t("rc_expires", clock=fmt.clock(ts)) if ts else ""
+    if not rc.count:
+        return [(t("rc_none"), False)]
+    if len(rc.kinds) > 1:
+        return [(t("rc_kind_count", kind=k, n=n) + expires(end), True) for k, n, end in rc.kinds]
+    return [(t("rc_count", n=rc.count) + expires(rc.expires_at), True)]
+
+
 class App:
     def __init__(self):
         winutil.enable_dpi_awareness()
@@ -77,7 +87,7 @@ class App:
         self.root.withdraw()
         self.root.report_callback_exception = lambda *exc: log.error("tk callback", exc_info=exc)
         self.scale = self.root.winfo_fpixels("1i") / 96
-        self.pal = theme.palette()
+        self.pal = theme.palette(self.settings["theme"])
         self.popup = Popup(self)
         self.settings_win: SettingsWindow | None = None
         self.icon = pystray.Icon("AgentUsage", tray_image("…", theme.STATUS["none"]), APP_NAME,
@@ -106,6 +116,8 @@ class App:
             self.popup.render_if_visible()
             self._update_tray()
             self.refresh()
+        elif key == "theme":
+            self.apply_theme()
         elif key == "language":
             i18n.set_language(value)
             self.icon.update_menu()
@@ -334,6 +346,16 @@ class App:
             self.post("login_done", pid)
         threading.Thread(target=wait, daemon=True).start()
 
+    def apply_theme(self) -> None:
+        """테마를 바꾸면 열린 창을 새 색으로 다시 만든다 (창의 색은 만들 때 정해진다)."""
+        pal = theme.palette(self.settings["theme"])
+        if pal is self.pal:
+            return
+        self.pal = pal
+        self.popup.recreate()
+        if self.settings_win and self.settings_win.alive():
+            self.settings_win.restyle()
+
     def open_settings(self) -> None:
         if self.settings_win and self.settings_win.alive():
             self.settings_win.focus()
@@ -367,6 +389,7 @@ class Popup:
         self._geom = None
         self._drag = (0, 0)
         self._scrolling = False
+        self._wheel_bound = False
         self.history = HistoryPanel(self)      # 팝업 옆에 붙는 사용 기록 패널
         self.activity = ActivityPanel(self)    # 그 바깥쪽에 붙는 작업 현황 패널
 
@@ -380,6 +403,15 @@ class Popup:
     @property
     def scrolling(self) -> bool:
         return self._scrolling
+
+    def block_bounds(self) -> tuple[int, int, int, int] | None:
+        """팝업과 옆에 붙은 패널들이 차지한 가로 범위와 팝업 위치: (왼쪽, 오른쪽, 팝업 가운데 x, 팝업 위 y).
+        팝업이 안 보이면 None. 팝업·패널은 항상 위에 떠 있어서, 설정 창은 이 범위를 피해 연다."""
+        if not (self.visible and self.win):
+            return None
+        wins = [self.win] + [p.win for p in (self.history, self.activity) if p.alive()]
+        return (min(w.winfo_x() for w in wins), max(w.winfo_x() + w.winfo_width() for w in wins),
+                self.win.winfo_x() + self.win.winfo_width() // 2, self.win.winfo_y())
 
     def card_layout(self) -> dict:
         """서비스 ID → (카드 프레임, 사용량 줄 수). 기록 패널이 그래프 위치·크기를 정하는 데 쓴다."""
@@ -430,6 +462,18 @@ class Popup:
         if was_open[1]:
             self.activity.show()
 
+    def recreate(self) -> None:
+        """테마가 바뀌면 팝업과 옆 패널을 새 색으로 다시 만든다. 보이던 팝업은 그 자리에 다시 보인다."""
+        was_visible = self.visible
+        for w in (self.win, self.history.win, self.activity.win):
+            if w:
+                w.destroy()
+        self.win, self.body, self.refs, self._sig, self._geom = None, None, {}, None, None
+        self.visible, self._scrolling = False, False
+        self.history, self.activity = HistoryPanel(self), ActivityPanel(self)
+        if was_visible:
+            self.show()                        # 켜 둔 패널도 함께 다시 보인다
+
     def update_activity_count(self) -> None:
         """머리글 작업 현황 버튼 옆 숫자: 진행 중인 작업 수 (답을 기다리는 게 있으면 노란색)."""
         label = self.refs.get("activity_count")
@@ -449,7 +493,7 @@ class Popup:
         self.win.attributes("-topmost", True)
         self.win.configure(bg=pal["border"])
         self.win.bind("<Escape>", lambda e: self.hide())
-        self.win.bind("<FocusOut>", lambda e: self.win.after(150, self._check_focus))
+        self.win.bind("<FocusOut>", lambda e: self.app.root.after(150, self._check_focus))  # 앱 기본 창에 예약: 테마 변경으로 이 창이 사라져도 확인은 그대로 돈다
         outer = tk.Frame(self.win, bg=pal["bg"])
         outer.pack(fill="both", expand=True, padx=1, pady=1)
         # 화면보다 길어지면 스크롤된다 (카드가 많거나 화면 배율이 클 때)
@@ -459,7 +503,9 @@ class Popup:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.frame = tk.Frame(self.canvas, bg=pal["bg"])
         self._frame_id = self.canvas.create_window(0, 0, window=self.frame, anchor="nw")
-        self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        if not self._wheel_bound:              # 테마를 바꿔 창을 다시 만들어도 한 번만 건다
+            self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
+            self._wheel_bound = True
 
     def show(self) -> None:
         if not self.win:
@@ -574,7 +620,7 @@ class Popup:
             card = {"id": pid, "title": mod.TITLE, "tag": t("experimental") if mod.EXPERIMENTAL else "",
                     "plan": (shown.plan or "") if shown else "",
                     "meta": f"{good.source} · {fmt.ago(good.data_at)}" if good else "",
-                    "loading": latest is None, "rows": [], "reset": None, "extras": [],
+                    "loading": latest is None, "rows": [], "reset": [], "extras": [],
                     "problem": None, "hint": "", "login": ""}
             if good:
                 for w in good.windows:
@@ -585,11 +631,8 @@ class Popup:
                     card["rows"].append({"key": w.key, "label": w.label, "note": w.note,
                                          "pct": t("pct_left", pct=f"{r:.0f}"), "remaining": r,
                                          "color": theme.STATUS[theme.level(r, threshold)], "when": when})
-                rc = good.reset_credits
-                if rc is not None:
-                    card["reset"] = ((t("rc_count", n=rc.count)
-                                      + (t("rc_expires", clock=fmt.clock(rc.expires_at)) if rc.expires_at else ""), True)
-                                     if rc.count else (t("rc_none"), False))
+                if good.reset_credits is not None:
+                    card["reset"] = reset_lines(good.reset_credits)
                 card["extras"] = list(good.extra)
             if latest and latest.error:
                 card["problem"] = latest.error + (t("last_success", ago=fmt.ago(good.data_at)) if good else "")
@@ -609,7 +652,7 @@ class Popup:
         return (self.pinned, i18n.lang(), tuple(
             (c["id"], c["loading"], bool(c["plan"]), bool(c["meta"]),
              tuple((r["key"], bool(r["note"]), bool(r["when"])) for r in c["rows"]),
-             c["reset"][1] if c["reset"] else None, len(c["extras"]), c["problem"] is not None, bool(c["hint"]),
+             tuple(bold for _, bold in c["reset"]), len(c["extras"]), c["problem"] is not None, bool(c["hint"]),
              bool(c["login"]))
             for c in m["cards"]))
 
@@ -737,10 +780,11 @@ class Popup:
             return refs
         for row in c["rows"]:
             refs["rows"][row["key"]] = self._build_row(inner, row)
-        if c["reset"]:
-            text, bold = c["reset"]
-            refs["reset"] = self._label(inner, text, 9, "text" if bold else "muted", bold=bold)
-            refs["reset"].pack(anchor="w", pady=(px(8), 0))
+        refs["reset"] = []
+        for i, (text, bold) in enumerate(c["reset"]):
+            lbl = self._label(inner, text, 9, "text" if bold else "muted", bold=bold)
+            lbl.pack(anchor="w", pady=(px(2) if i else px(8), 0))
+            refs["reset"].append(lbl)
         for line in c["extras"]:
             lbl = self._label(inner, line, 8, "text2", wraplength=px(self.WIDTH - 60), justify="left")
             lbl.pack(anchor="w", pady=(px(3), 0))
@@ -828,8 +872,8 @@ class Popup:
                 if r["bar"].value != value:
                     r["bar"].value = value
                     self._draw_bar(r["bar"])
-            if c["reset"]:
-                self._set(refs.get("reset"), c["reset"][0])
+            for lbl, (text, _) in zip(refs.get("reset", []), c["reset"]):
+                self._set(lbl, text)
             for label, text in zip(refs["extras"], c["extras"]):
                 self._set(label, text)
             if c["problem"] is not None:

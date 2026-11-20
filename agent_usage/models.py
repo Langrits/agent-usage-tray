@@ -31,6 +31,7 @@ class ResetCredits:
     """사용량 재설정권."""
     count: int
     expires_at: float | None = None   # 가장 먼저 소멸하는 시각
+    kinds: list[tuple[str, int, float | None]] = field(default_factory=list)   # 종류별 (이름, 개수, 가장 먼저 소멸하는 시각)
 
 
 @dataclass

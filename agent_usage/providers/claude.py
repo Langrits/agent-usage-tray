@@ -196,7 +196,19 @@ def parse(usage: Usage, d: dict) -> None:
         usage.extra.append(t("week_breakdown",
                              rows=" · ".join(f"{r['display_name']} {r['percent']:.0f}%" for r in rows)))
 
-    usage.reset_credits = _reset_credits(d.get("cedar_ember"))
+    usage.reset_credits = _reset_credits(d.get("cedar_ember"), _scoped_models(d.get("limits")))
+
+
+def _scoped_models(limits) -> list[str]:
+    """모델별 한도의 모델 이름 (Fable 등). 모양이 다른 항목은 건너뛴다."""
+    out = []
+    for lim in limits if isinstance(limits, list) else []:
+        scope = lim.get("scope") if isinstance(lim, dict) else None
+        model = scope.get("model") if isinstance(scope, dict) else None
+        name = model.get("display_name") if isinstance(model, dict) else None
+        if isinstance(name, str) and name:
+            out.append(name)
+    return out
 
 
 def _parse_limits(usage: Usage, limits: list) -> None:
@@ -239,16 +251,39 @@ def _parse_legacy(usage: Usage, d: dict) -> None:
     usage.windows.sort(key=lambda w: ORDER.index(w.key) if w.key in ORDER else len(ORDER))
 
 
-def _reset_credits(ce) -> ResetCredits | None:
-    """재설정권(cedar_ember): 받은 재설정권들의 남은 횟수 합과 가장 먼저 끝나는 날.
+def _reset_credits(ce, models=()) -> ResetCredits | None:
+    """재설정권(cedar_ember): 남은 횟수 합, 가장 먼저 끝나는 날, 종류별(전체·Fable 등) 개수와 소멸 시각.
 
     서버가 이 계정·요청을 대상으로 보지 않으면(eligible이 아님) 줄 자체를 보여 주지 않는다.
     """
     if not isinstance(ce, dict) or ce.get("eligible") is not True:
         return None
-    left = [(as_number(g.get("resets_left")), epoch(g.get("ends_at")))
-            for g in ce.get("grants") or [] if isinstance(g, dict)]
     now = time.time()
-    left = [(n, end) for n, end in left if n and n > 0 and (end is None or end > now)]   # 이미 끝난 것은 빼고
-    ends = [end for _, end in left if end]
-    return ResetCredits(int(sum(n for n, _ in left)), min(ends) if ends else None)
+    kinds: dict[str, list] = {}                 # 이름 → [개수, 가장 먼저 끝나는 날] (받은 순서대로)
+    for g in ce.get("grants") or []:
+        if not isinstance(g, dict):
+            continue
+        n, end = as_number(g.get("resets_left")), epoch(g.get("ends_at"))
+        if n is None or n < 1 or n != int(n) or (end is not None and end <= now):   # 다 썼거나, 이상한 값이거나, 끝난 것은 빼고
+            continue
+        kind = kinds.setdefault(_grant_kind(g, models), [0, None])
+        kind[0] += int(n)
+        if end and (kind[1] is None or end < kind[1]):
+            kind[1] = end
+    ends = [end for _, end in kinds.values() if end]
+    return ResetCredits(sum(n for n, _ in kinds.values()), min(ends) if ends else None,
+                        [(name, n, end) for name, (n, end) in kinds.items()])
+
+
+def _grant_kind(g: dict, models) -> str:
+    """재설정권 종류 이름: 이름에 모델명(Fable 등)이 있으면 그 모델, 5시간·주간을 모두 비우면 '전체', 5시간만이면 '5시간'."""
+    label = str(g.get("label") or "").lower()
+    for model in models:
+        if model.lower() in label:
+            return model
+    clears = g.get("clears") if isinstance(g.get("clears"), list) else []
+    if "five_hour" in clears and "seven_day" in clears:
+        return t("rc_kind_full")
+    if "five_hour" in clears:
+        return t("rc_kind_5h")
+    return t("rc_kind_other")

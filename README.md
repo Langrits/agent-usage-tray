@@ -74,12 +74,13 @@ Open **Settings…** from the tray menu or the ⚙ button in the popup.
 
 | Setting | Default |
 |---|---|
-| Show each service: Auto (when signed in) / Always / Hide | Auto |
-| Alert when remaining drops to … % | 20% |
-| Alert when a limit resets or a reset credit arrives | On |
-| Refresh every … minutes | 5 |
+| Show each service: Auto (when signed in) / Show / Hide | Auto |
+| Low usage alert · threshold (remaining) | On · 20% |
+| Reset alerts (a limit resets or a reset credit arrives) | On |
+| Refresh every | 5 min |
 | Renew logins automatically (Claude · Gemini) | On |
 | Start with Windows | Off |
+| Theme: Auto (follows the Windows app mode) / Light / Dark | Auto |
 | Language: Auto / 한국어 / English | Auto |
 
 Settings, history and logs live in `%USERPROFILE%\.ai-usage-tray`.

@@ -10,7 +10,10 @@ import time
 import unittest
 from unittest import mock
 
-os.environ["AGENT_USAGE_DATA"] = tempfile.mkdtemp(prefix="agent_usage_test_")   # store 를 불러오기 전에
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _testdata  # noqa: E402,F401  실제 데이터 폴더를 쓰지 않도록 store 보다 먼저
 
 from agent_usage import i18n, winutil  # noqa: E402
 from agent_usage.models import Usage, Window  # noqa: E402
@@ -77,8 +80,8 @@ class LegacyMergeTest(unittest.TestCase):
 
     def test_settings_file_with_null_starts_from_defaults(self):
         import agent_usage.store as store
-        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
-            self.skipTest("store points at the real data folder")
+        if not _testdata.is_test_dir(store.DATA_DIR):
+            self.skipTest("store does not point at the test's own temporary folder")
         with open(os.path.join(store.DATA_DIR, "null_test.json"), "w", encoding="utf-8") as f:
             f.write("null")
         self.assertEqual(store.JsonFile("null_test.json", {"a": 1}).data, {"a": 1})
@@ -190,8 +193,8 @@ class HistoryTest(unittest.TestCase):
     def setUp(self):
         # 이 테스트는 기록을 비운다. 다른 테스트가 먼저 store를 불러와 실제 기록 폴더를 가리키고 있으면 절대 실행하지 않는다
         import agent_usage.store as store
-        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
-            self.skipTest("store points at the real data folder")
+        if not _testdata.is_test_dir(store.DATA_DIR):
+            self.skipTest("store does not point at the test's own temporary folder")
         self.h = History()
         self.h.con.execute("delete from samples")
         self.h.con.commit()
@@ -257,6 +260,56 @@ class ParseTest(unittest.TestCase):
             {"resets_left": 1, "ends_at": day(-1)}]})           # 이미 끝난 것은 빼고
         self.assertEqual(rc.count, 2)
         self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
+
+    def test_claude_reset_credits_by_kind(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
+        u = Usage("claude", "Claude")
+        claude.parse(u, {"limits": [{"kind": "session", "percent": 10, "resets_at": None},
+                                    {"kind": "weekly_scoped", "percent": 0, "resets_at": None,
+                                     "scope": {"model": {"display_name": "Fable"}}}],
+                         "cedar_ember": {"eligible": True, "grants": [
+                             {"label": "One full limit reset", "resets_left": 1, "ends_at": day(21),
+                              "clears": ["five_hour", "seven_day"]},
+                             {"label": "New model launch: one Fable reset", "resets_left": 1, "ends_at": day(110),
+                              "clears": ["five_hour"]},
+                             {"label": "Another full reset", "resets_left": 2, "ends_at": day(30),
+                              "clears": ["five_hour", "seven_day"]}]}})
+        rc = u.reset_credits
+        self.assertEqual(rc.count, 4)
+        self.assertEqual([(k, n) for k, n, _ in rc.kinds], [(i18n.t("rc_kind_full"), 3), ("Fable", 1)])
+        self.assertEqual(round(rc.kinds[0][2]), round(claude.epoch(day(21))))          # 같은 종류는 빠른 소멸일
+        self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
+
+    def test_claude_reset_kind_names_and_odd_fields(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
+        u = Usage("claude", "Claude")
+        claude.parse(u, {"limits": [{"kind": "session", "percent": 10, "resets_at": None},
+                                    {"kind": "weekly_scoped", "scope": "unknown"},          # 모양이 다른 항목
+                                    {"kind": "weekly_scoped", "scope": {"model": None}}],
+                         "cedar_ember": {"eligible": True, "grants": [
+                             {"label": None, "resets_left": 1, "ends_at": day(9), "clears": ["five_hour"]},
+                             {"label": "x", "resets_left": 1, "ends_at": day(5), "clears": ["five_hour"]},
+                             {"label": "y", "resets_left": 1, "ends_at": day(40), "clears": "weekly"},
+                             {"label": "z", "resets_left": 0.5, "ends_at": day(1), "clears": ["five_hour", "seven_day"]},
+                             {"label": "w", "resets_left": "2", "ends_at": day(1), "clears": ["five_hour", "seven_day"]},
+                             "not a grant"]}})
+        rc = u.reset_credits
+        self.assertEqual([(k, n) for k, n, _ in rc.kinds], [(i18n.t("rc_kind_5h"), 2), (i18n.t("rc_kind_other"), 1)])
+        self.assertEqual(round(rc.kinds[0][2]), round(claude.epoch(day(5))))       # 같은 종류는 더 빠른 소멸일
+        self.assertEqual((rc.count, round(rc.expires_at)), (3, round(claude.epoch(day(5)))))
+
+    def test_card_lines_split_only_when_kinds_differ(self):
+        from agent_usage.app import reset_lines
+        from agent_usage.models import ResetCredits
+        now = time.time()
+        one = reset_lines(ResetCredits(3, now + 86400, [(i18n.t("rc_kind_full"), 3, now + 86400)]))
+        self.assertEqual(len(one), 1)
+        self.assertTrue(one[0][0].startswith(i18n.t("rc_count", n=3)))
+        two = reset_lines(ResetCredits(2, now + 86400, [(i18n.t("rc_kind_full"), 1, now + 86400), ("Fable", 1, None)]))
+        self.assertEqual([text for text, _ in two][1], i18n.t("rc_kind_count", kind="Fable", n=1))
+        self.assertEqual(reset_lines(ResetCredits(0)), [(i18n.t("rc_none"), False)])
 
     def test_claude_reset_credits_none_left_and_not_eligible(self):
         self.assertEqual(self.claude_credits({"eligible": True, "grants": []}).count, 0)

@@ -60,6 +60,17 @@ def round_corners(tk_window) -> None:
         pass
 
 
+def dark_title_bar(tk_window, dark: bool) -> None:
+    """어두운 테마면 Windows 제목 줄도 어둡게 (Windows 10 20H1 이상)."""
+    try:
+        tk_window.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(tk_window.winfo_id())
+        value = ctypes.c_int(1 if dark else 0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+    except (AttributeError, OSError):
+        pass
+
+
 def bring_to_front(tk_window) -> None:
     """새 창이 다른 앱 창 뒤에 열리지 않도록 잠깐 맨 위로 올렸다가 되돌린다."""
     tk_window.deiconify()

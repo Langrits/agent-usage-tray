@@ -97,7 +97,7 @@ class ActivityPanel:
         self.win.bind("<Escape>", lambda e: self.popup.hide())
         # 패널을 눌러도 팝업이 '포커스를 잃었다'며 닫히지 않게 포커스를 이 앱 안에 둔다
         self.win.bind("<ButtonPress>", lambda e: self.win.focus_force(), add="+")
-        self.win.bind("<FocusOut>", lambda e: self.popup.win.after(150, self.popup._check_focus))
+        self.win.bind("<FocusOut>", lambda e: self.app.root.after(150, self.popup._check_focus))
         head = tk.Frame(self.frame, bg=pal["bg"])
         head.pack(fill="x", padx=(px(14), px(12)), pady=(px(8), px(6)))    # 팝업 머리글과 같은 높이
         tk.Label(head, text=t("a_title"), font=(theme.FONT, 11, "bold"), fg=pal["text"],

@@ -44,7 +44,12 @@ def is_light() -> bool:
         return False
 
 
-def palette() -> dict:
+def palette(choice: str = "auto") -> dict:
+    """설정의 테마: "light" | "dark" | "auto"(Windows 앱 모드를 따른다)."""
+    if choice == "light":
+        return LIGHT
+    if choice == "dark":
+        return DARK
     return LIGHT if is_light() else DARK
 
 

@@ -125,7 +125,7 @@ class HistoryPanel:
         # 패널을 눌러도 팝업이 '포커스를 잃었다'며 닫히지 않게 포커스를 이 앱 안에 둔다
         self.win.bind("<ButtonPress>", lambda e: self.win.focus_force(), add="+")
         # 패널에서 다른 앱으로 넘어가도 팝업과 똑같이 닫히게 (고정하지 않았을 때)
-        self.win.bind("<FocusOut>", lambda e: self.popup.win.after(150, self.popup._check_focus))
+        self.win.bind("<FocusOut>", lambda e: self.app.root.after(150, self.popup._check_focus))
         self._build_header()
 
     def show(self) -> None:
