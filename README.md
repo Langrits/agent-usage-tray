@@ -32,6 +32,16 @@ Claude only includes reset credits in its usage answer for Claude Code, so the a
 
 ## Install
 
+### Windows app (no Python needed)
+
+1. Download `AI-Usage-Tray-<version>-windows-x64.zip` from the [latest release](https://github.com/Langrits/agent-usage-tray/releases/latest).
+2. Unzip it anywhere (for example your Documents folder) and run **AI Usage Tray.exe** in the `AI Usage Tray` folder.
+3. If "Windows protected your PC" appears the first time, click **More info → Run anyway**. The app is not code-signed, so Windows shows this warning. Checking **Unblock** in the zip file's Properties before unzipping avoids it.
+
+If you move the folder later, **Start with Windows** shows as off in Settings; turn it on again (the program's location changed).
+
+### From source (Python)
+
 Requirements: **Windows 10/11** and **Python 3.10+** from [python.org](https://www.python.org/downloads/) (includes tkinter).
 
 ```powershell
@@ -105,7 +115,8 @@ There are no official usage APIs for these plans, so this app calls **the same i
 
 ## Update / uninstall
 
-- Update: `git pull`, then run `install.cmd` again.
+- Update (Windows app): quit from the tray menu, then replace the old `AI Usage Tray` folder with the one from the new zip. Settings and history stay in `%USERPROFILE%\.ai-usage-tray`.
+- Update (from source): `git pull`, then run `install.cmd` again.
 - Uninstall: turn off **Start with Windows** in Settings, quit from the tray menu, then delete the folder and `%USERPROFILE%\.ai-usage-tray` (and `%LOCALAPPDATA%\AgentUsage` if an older version left it).
 
 ## Troubleshooting

@@ -90,17 +90,21 @@ def already_running() -> bool:
 
 
 def _autostart_command() -> str:
+    if getattr(sys, "frozen", False):              # exe로 받아 쓰는 경우: exe 자신을 등록한다
+        return f'"{sys.executable}"'
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     return f'"{pythonw}" "{os.path.join(PROJECT_DIR, "run.pyw")}"'
 
 
 def autostart_enabled() -> bool:
+    """지금 실행 중인 이 프로그램이 자동 실행에 등록돼 있는지.
+    소스판에서 exe판으로 바꿨거나 폴더를 옮겨 예전 경로가 등록돼 있으면 꺼짐으로 보여 다시 켜게 한다."""
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
-            winreg.QueryValueEx(k, RUN_NAME)
-            return True
+            value, _ = winreg.QueryValueEx(k, RUN_NAME)
     except OSError:
         return False
+    return isinstance(value, str) and value.strip().lower() == _autostart_command().lower()
 
 
 def set_autostart(on: bool) -> None:

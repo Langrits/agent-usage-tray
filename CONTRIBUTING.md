@@ -22,6 +22,7 @@ agent_usage/
   store.py                  settings.json, history.sqlite
 tools/probe.py              print a redacted response from a usage endpoint
 tools/snapshot.py           render popup / chart / settings to PNG (use --fake for screenshots)
+tools/build_exe.py          build the Windows app zip with PyInstaller (run from a separate .venv-build)
 ```
 
 ## Adding a service
