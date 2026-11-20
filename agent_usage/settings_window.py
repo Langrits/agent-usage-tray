@@ -39,6 +39,15 @@ def step_value(values, current: int, direction: int) -> int:
     return next((v for v in reversed(values) if v < current), values[0])
 
 
+def place_x(block: tuple[int, int] | None, w: int, gap: int, left: int, right: int) -> int:
+    """설정 창의 x: 팝업·패널 묶음(block = 왼쪽, 오른쪽)의 왼쪽, 자리가 없으면 오른쪽, 둘 다 없으면 가운데."""
+    if block and block[0] - gap - w >= left:
+        return block[0] - gap - w
+    if block and block[1] + gap + w <= right:
+        return block[1] + gap
+    return left + max(0, (right - left - w) // 2)
+
+
 def switch_image(on: bool, focused: bool, colors: dict, scale: float) -> Image.Image:
     """스위치 그림. 4배로 그려 줄여서 가장자리를 매끄럽게 한다. 둘레에는 포커스 테두리 자리를 둔다."""
     k = 4
@@ -192,7 +201,7 @@ class SettingsWindow:
         self.win = tk.Toplevel(app.root)
         self.win.configure(bg=self.c["win"])
         self.win.resizable(False, False)
-        self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        self.win.bind("<MouseWheel>", self._on_wheel)       # 창 안의 모든 부품에 걸리고, 창과 함께 사라진다
         self.status: dict[str, tuple[tk.Label, tk.Label]] = {}
         self.scrolling = False
         self.placed = False
@@ -329,7 +338,14 @@ class SettingsWindow:
         """내용 높이에 맞추되, 작업 영역보다 길면 그만큼만 열고 스크롤한다."""
         self.body.update_idletasks()
         need = self.body.winfo_reqheight()
-        left, top, right, bottom = winutil.work_area()
+        bounds = None if self.placed else self.app.popup.block_bounds()
+        if self.placed:                            # 다시 그릴 때(언어 변경): 창이 지금 있는 모니터 기준
+            left, top, right, bottom = winutil.work_area_at(self.win.winfo_x() + self.win.winfo_width() // 2,
+                                                            self.win.winfo_y())
+        elif bounds:                               # 처음: 팝업이 있는 모니터 기준
+            left, top, right, bottom = winutil.work_area_at(bounds[2], bounds[3])
+        else:
+            left, top, right, bottom = winutil.work_area()
         room = bottom - top - self.px(80)          # 제목 줄·여백
         self.scrolling = need > room
         self.canvas.configure(height=min(need, room), scrollregion=(0, 0, self.px(WIDTH), need))
@@ -338,27 +354,17 @@ class SettingsWindow:
             self.canvas.configure(yscrollcommand=bar.set)
             bar.pack(side="right", fill="y")
         if not self.placed:
-            # 처음 열 때만 자리를 잡는다: 항상 위에 떠 있는 팝업·패널 왼쪽(자리가 없으면 작업 영역 가운데),
-            # 세로는 작업 영역 가운데라 작업 표시줄에 가리지 않는다
+            # 처음 열 때만 자리를 잡는다: 항상 위에 떠 있는 팝업·패널 묶음의 왼쪽, 자리가 없으면 오른쪽,
+            # 둘 다 없으면 가운데. 세로는 작업 영역 가운데라 작업 표시줄에 가리지 않는다
             self.placed = True
             self.win.update_idletasks()
             w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
-            block = self.app.popup.block_left()
-            if block is not None and block - self.px(12) - w >= left:
-                x = block - self.px(12) - w
-            else:
-                x = left + max(0, (right - left - w) // 2)
+            x = place_x(bounds[:2] if bounds else None, w, self.px(12), left, right)
             y = top + max(0, (bottom - top - h - self.px(32)) // 2)    # 32: 제목 줄
             self.win.geometry(f"+{x}+{y}")
 
     def _on_wheel(self, e) -> None:
-        if not (self.scrolling and self.alive()):
-            return
-        try:
-            inside = e.widget.winfo_toplevel() == self.win
-        except (AttributeError, tk.TclError):
-            inside = False
-        if inside:
+        if self.scrolling:
             self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
 
     def refresh_status(self) -> None:

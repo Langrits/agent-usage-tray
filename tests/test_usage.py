@@ -10,8 +10,10 @@ import time
 import unittest
 from unittest import mock
 
-# store 를 불러오기 전에 임시 폴더로 (다른 테스트 파일이 먼저 정했으면 그 폴더를 같이 쓴다)
-os.environ.setdefault("AGENT_USAGE_DATA", tempfile.mkdtemp(prefix="agent_usage_test_"))
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _testdata  # noqa: E402,F401  실제 데이터 폴더를 쓰지 않도록 store 보다 먼저
 
 from agent_usage import i18n, winutil  # noqa: E402
 from agent_usage.models import Usage, Window  # noqa: E402
@@ -78,8 +80,8 @@ class LegacyMergeTest(unittest.TestCase):
 
     def test_settings_file_with_null_starts_from_defaults(self):
         import agent_usage.store as store
-        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
-            self.skipTest("store points at the real data folder")
+        if not _testdata.is_test_dir(store.DATA_DIR):
+            self.skipTest("store does not point at the test's own temporary folder")
         with open(os.path.join(store.DATA_DIR, "null_test.json"), "w", encoding="utf-8") as f:
             f.write("null")
         self.assertEqual(store.JsonFile("null_test.json", {"a": 1}).data, {"a": 1})
@@ -191,8 +193,8 @@ class HistoryTest(unittest.TestCase):
     def setUp(self):
         # 이 테스트는 기록을 비운다. 다른 테스트가 먼저 store를 불러와 실제 기록 폴더를 가리키고 있으면 절대 실행하지 않는다
         import agent_usage.store as store
-        if os.path.abspath(store.DATA_DIR) != os.path.abspath(os.environ["AGENT_USAGE_DATA"]):
-            self.skipTest("store points at the real data folder")
+        if not _testdata.is_test_dir(store.DATA_DIR):
+            self.skipTest("store does not point at the test's own temporary folder")
         self.h = History()
         self.h.con.execute("delete from samples")
         self.h.con.commit()

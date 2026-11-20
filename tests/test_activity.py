@@ -5,9 +5,14 @@
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import time
 import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _testdata  # noqa: E402,F401  실제 데이터 폴더를 쓰지 않도록 store 보다 먼저
+
 from datetime import datetime, timezone
 from unittest import mock
 
