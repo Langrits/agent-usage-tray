@@ -10,7 +10,8 @@ import time
 import unittest
 from unittest import mock
 
-os.environ["AGENT_USAGE_DATA"] = tempfile.mkdtemp(prefix="agent_usage_test_")   # store 를 불러오기 전에
+# store 를 불러오기 전에 임시 폴더로 (다른 테스트 파일이 먼저 정했으면 그 폴더를 같이 쓴다)
+os.environ.setdefault("AGENT_USAGE_DATA", tempfile.mkdtemp(prefix="agent_usage_test_"))
 
 from agent_usage import i18n, winutil  # noqa: E402
 from agent_usage.models import Usage, Window  # noqa: E402

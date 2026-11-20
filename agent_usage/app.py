@@ -381,6 +381,13 @@ class Popup:
     def scrolling(self) -> bool:
         return self._scrolling
 
+    def block_left(self) -> int | None:
+        """팝업과 옆에 붙은 패널들이 차지한 가장 왼쪽 x (팝업이 안 보이면 None).
+        팝업·패널은 항상 위에 떠 있어서, 설정 창은 그 왼쪽에 연다."""
+        if not (self.visible and self.win):
+            return None
+        return min([self.win.winfo_x()] + [p.win.winfo_x() for p in (self.history, self.activity) if p.alive()])
+
     def card_layout(self) -> dict:
         """서비스 ID → (카드 프레임, 사용량 줄 수). 기록 패널이 그래프 위치·크기를 정하는 데 쓴다."""
         return {pid: (refs["frame"], len(refs.get("rows", {})))
