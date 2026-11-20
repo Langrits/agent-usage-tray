@@ -45,6 +45,7 @@ class Usage:
     data_at: float = field(default_factory=time.time)   # 데이터 기준 시각
     error: str | None = None
     hint: str | None = None       # 오류 시 사용자가 할 일
+    login_cmd: list[str] | None = None   # 다시 로그인 버튼이 실행할 그 앱의 공식 로그인 명령
 
     @property
     def ok(self) -> bool:

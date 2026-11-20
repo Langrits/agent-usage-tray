@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import subprocess
 import sys
 import threading
 import time
@@ -63,6 +64,7 @@ class App:
         self.updated_at: float | None = None
         self.activity: activity.Snapshot | None = None    # 마지막으로 모은 작업 현황
         self._activity_busy = False
+        self._login: tuple[str, subprocess.Popen] | None = None   # 다시 로그인 중인 서비스와 그 로그인 창
         self.fetching = False
         self._refresh_again = False
         self._quitting = False
@@ -180,6 +182,9 @@ class App:
                 self.popup.toggle_activity()
         elif kind == "activity_result":
             self._on_activity(arg)
+        elif kind == "login_done":
+            self._login = None
+            self.refresh()
         elif kind == "settings":
             self.open_settings()
         elif kind == "quit":
@@ -306,6 +311,28 @@ class App:
         if self.popup.visible:          # 팝업을 볼 때만 모은다 (머리글 버튼의 개수·패널)
             self.refresh_activity()
         self.root.after(ACTIVITY_EVERY_S * 1000, self._activity_tick)
+
+    # ── 다시 로그인 ───────────────────────────────────────
+    def logging_in(self, pid: str) -> bool:
+        return bool(self._login) and self._login[0] == pid
+
+    def start_login(self, pid: str) -> None:
+        """그 앱의 공식 로그인 명령을 새 창에서 실행한다 (승인은 브라우저에서). 창이 닫히면 다시 조회한다."""
+        u = self.latest.get(pid)
+        if self._login or not (u and u.login_cmd):
+            return
+        try:
+            proc = subprocess.Popen(u.login_cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except OSError:
+            log.exception("%s: login command did not start", pid)
+            return
+        self._login = (pid, proc)
+        self.popup.render_if_visible()
+
+        def wait():
+            proc.wait()
+            self.post("login_done", pid)
+        threading.Thread(target=wait, daemon=True).start()
 
     def open_settings(self) -> None:
         if self.settings_win and self.settings_win.alive():
@@ -548,7 +575,7 @@ class Popup:
                     "plan": (shown.plan or "") if shown else "",
                     "meta": f"{good.source} · {fmt.ago(good.data_at)}" if good else "",
                     "loading": latest is None, "rows": [], "reset": None, "extras": [],
-                    "problem": None, "hint": ""}
+                    "problem": None, "hint": "", "login": ""}
             if good:
                 for w in good.windows:
                     r = w.remaining_pct
@@ -567,6 +594,8 @@ class Popup:
             if latest and latest.error:
                 card["problem"] = latest.error + (t("last_success", ago=fmt.ago(good.data_at)) if good else "")
                 card["hint"] = latest.hint or ""
+                if latest.login_cmd:
+                    card["login"] = t("relogin_running") if app.logging_in(pid) else t("relogin")
             cards.append(card)
         if app.fetching:
             footer = t("refreshing")
@@ -580,7 +609,8 @@ class Popup:
         return (self.pinned, i18n.lang(), tuple(
             (c["id"], c["loading"], bool(c["plan"]), bool(c["meta"]),
              tuple((r["key"], bool(r["note"]), bool(r["when"])) for r in c["rows"]),
-             c["reset"][1] if c["reset"] else None, len(c["extras"]), c["problem"] is not None, bool(c["hint"]))
+             c["reset"][1] if c["reset"] else None, len(c["extras"]), c["problem"] is not None, bool(c["hint"]),
+             bool(c["login"]))
             for c in m["cards"]))
 
     def render_if_visible(self) -> None:
@@ -726,7 +756,20 @@ class Popup:
                 refs["hint"] = self._label(inner, c["hint"], 8, "text2", wraplength=px(self.WIDTH - 60),
                                            justify="left")
                 refs["hint"].pack(anchor="w", padx=(px(14), 0), pady=(px(2), 0))
+            if c["login"]:
+                refs["login"] = self._link_button(inner, c["login"], lambda pid=c["id"]: self.app.start_login(pid))
+                refs["login"].pack(anchor="w", padx=(px(14), 0), pady=(px(6), 0))
         return refs
+
+    def _link_button(self, parent, text: str, command) -> tk.Label:
+        """카드 안의 작은 버튼 (다시 로그인 등)."""
+        pal = self.app.pal
+        b = tk.Label(parent, text=text, font=(theme.FONT, 9, "bold"), fg=pal["text"], bg=pal["hover"],
+                     padx=self.px(10), pady=self.px(3), cursor="hand2")
+        b.bind("<Enter>", lambda e: b.configure(bg=pal["border"]))
+        b.bind("<Leave>", lambda e: b.configure(bg=pal["hover"]))
+        b.bind("<Button-1>", lambda e: self.win.after_idle(command))
+        return b
 
     def _build_row(self, parent, row: dict) -> dict:
         pal, px = self.app.pal, self.px
@@ -792,6 +835,7 @@ class Popup:
             if c["problem"] is not None:
                 self._set(refs.get("problem"), c["problem"])
             self._set(refs.get("hint"), c["hint"])
+            self._set(refs.get("login"), c["login"])
         self._set(self.refs.get("footer"), m["footer"])
 
 

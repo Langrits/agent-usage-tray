@@ -241,6 +241,160 @@ class ParseTest(unittest.TestCase):
         self.assertFalse(u.ok)
         self.assertEqual(u.error, i18n.t("err_format"))
 
+    def claude_credits(self, cedar_ember):
+        u = Usage("claude", "Claude")
+        claude.parse(u, {"limits": [{"kind": "session", "percent": 10, "resets_at": None}],
+                         "cedar_ember": cedar_ember})
+        return u.reset_credits
+
+    def test_claude_reset_credits_sum_and_earliest_end(self):
+        from datetime import datetime, timezone
+        day = lambda n: datetime.fromtimestamp(time.time() + n * 86400, timezone.utc).isoformat()
+        rc = self.claude_credits({"eligible": True, "grants": [
+            {"resets_left": 1, "ends_at": day(21)},
+            {"resets_left": 1, "ends_at": day(110)},
+            {"resets_left": 0, "ends_at": day(1)},              # 다 쓴 것과
+            {"resets_left": 1, "ends_at": day(-1)}]})           # 이미 끝난 것은 빼고
+        self.assertEqual(rc.count, 2)
+        self.assertEqual(round(rc.expires_at), round(claude.epoch(day(21))))
+
+    def test_claude_reset_credits_none_left_and_not_eligible(self):
+        self.assertEqual(self.claude_credits({"eligible": True, "grants": []}).count, 0)
+        self.assertIsNone(self.claude_credits({"eligible": False, "ineligible_reason": "surface", "grants": []}))
+        self.assertIsNone(self.claude_credits(None))
+
+    def test_claude_cli_version_is_the_newest_installed(self):
+        home, appdata = tempfile.mkdtemp(), tempfile.mkdtemp()
+        versions = os.path.join(home, ".local", "share", "claude", "versions")
+        os.makedirs(versions)
+        for name in ("2.1.99", "2.1.326", "2.1.304", "notes.txt"):
+            open(os.path.join(versions, name), "w").close()
+        with mock.patch.object(claude, "HOME", home), mock.patch.dict(os.environ, {"APPDATA": appdata}):
+            self.assertEqual(claude._cli_version(), "2.1.326")
+        with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), mock.patch.dict(os.environ, {"APPDATA": appdata}):
+            self.assertEqual(claude._cli_version(), claude.CLI_VERSION_FALLBACK)
+
+    def test_claude_login_button_runs_the_cli_login(self):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, ".local", "bin"))
+        exe = os.path.join(home, ".local", "bin", "claude.exe")
+        open(exe, "w").close()
+        with mock.patch.object(claude, "HOME", home), mock.patch.dict(os.environ, {"PATH": ""}):
+            u = claude._needs_login(Usage("claude", "Claude"), "expired")
+        self.assertEqual(u.login_cmd, [exe, "auth", "login", "--claudeai"])
+        self.assertEqual(u.hint, i18n.t("hint_claude_relogin"))
+        with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), \
+                mock.patch.dict(os.environ, {"PATH": "", "APPDATA": tempfile.mkdtemp()}):
+            u = claude._needs_login(Usage("claude", "Claude"), "expired")      # Claude Code가 없으면 버튼 없이 안내만
+        self.assertIsNone(u.login_cmd)
+        self.assertEqual(u.hint, i18n.t("hint_claude_login"))
+
+    def test_claude_login_command_ignores_current_and_relative_folders(self):
+        cwd, good = tempfile.mkdtemp(), tempfile.mkdtemp()
+        for d in (cwd, good):
+            open(os.path.join(d, "claude.exe"), "w").close()
+        old = os.getcwd()
+        os.chdir(cwd)
+        try:
+            with mock.patch.object(claude, "HOME", tempfile.mkdtemp()), \
+                    mock.patch.dict(os.environ, {"PATH": os.pathsep.join([".", "bin", good]), "APPDATA": ""}):
+                cmd = claude._login_cmd()
+        finally:
+            os.chdir(old)
+        self.assertEqual(cmd[0], os.path.join(good, "claude.exe"))
+
+    def test_claude_lookup_skips_drive_relative_paths_and_npm_without_appdata(self):
+        drive_relative = os.sep + "bin"                       # 드라이브 없는 경로 (현재 드라이브 기준)
+        home = tempfile.mkdtemp()
+        env = {k: v for k, v in os.environ.items() if k != "APPDATA"}
+        env["PATH"] = os.pathsep.join([drive_relative, "relative"])
+        with mock.patch.object(claude, "HOME", home), mock.patch.dict(os.environ, env, clear=True):
+            found = list(claude._claude_candidates())
+        self.assertEqual(found, [os.path.join(home, ".local", "bin", "claude.exe")])
+        self.assertFalse(claude._absolute(drive_relative))
+        self.assertTrue(claude._absolute(os.path.join(home, "x")))
+
+    def test_claude_button_also_when_auto_renewal_is_off(self):
+        def expired(opts):
+            raise claude.LoginProblem(i18n.t("err_expired", title="Claude"), i18n.t("hint_claude_run"))
+        with mock.patch.object(claude, "_access_token", expired), \
+                mock.patch.object(claude, "_login_cmd", lambda: ["claude.exe", "auth", "login", "--claudeai"]):
+            u = claude.fetch(Options(auto_refresh_login=False))
+        self.assertEqual((u.login_cmd is not None, u.hint), (True, i18n.t("hint_claude_relogin")))
+        with mock.patch.object(claude, "_access_token", expired), mock.patch.object(claude, "_login_cmd", lambda: None):
+            u = claude.fetch(Options(auto_refresh_login=False))
+        self.assertEqual(u.hint, i18n.t("hint_claude_run"))                   # 버튼이 없으면 원래 안내
+
+    def test_codex_reset_details_only_read_and_never_lose_the_count(self):
+        class Resp:
+            def __init__(self, data, status=200):
+                self.data, self.status_code = data, status
+
+            def json(self):
+                return self.data
+
+            def raise_for_status(self):
+                pass
+        usage_answer = {"rate_limit": {"primary_window": {"used_percent": 10, "limit_window_seconds": 604800}},
+                        "rate_limit_reset_credits": {"available_count": 2}}
+        for details in ([1, 2], None, {"credits": 1}, ValueError("bad json")):
+            calls = []
+
+            def get(url, **kw):
+                calls.append(url)
+                if url == codex.USAGE_URL:
+                    return Resp(usage_answer)
+                if isinstance(details, Exception):
+                    raise details
+                return Resp(details)
+            with mock.patch.object(codex, "read_json", lambda p: {"tokens": {"access_token": "x", "account_id": "y"}}), \
+                    mock.patch.object(codex.requests, "get", get), \
+                    mock.patch.object(codex.requests, "post", lambda *a, **k: self.fail("must not POST")):
+                u = codex.fetch(Options())
+            self.assertEqual((u.source, u.reset_credits.count, u.reset_credits.expires_at),
+                             (i18n.t("source_api"), 2, None), details)
+            self.assertEqual(calls, [codex.USAGE_URL, codex.RESET_CREDITS_URL])
+            self.assertFalse(any("consume" in c for c in calls))
+
+    def test_login_button_runs_once_and_refreshes_when_the_window_closes(self):
+        import types
+
+        from agent_usage.app import App
+        posted, started = [], []
+
+        class Proc:
+            def poll(self):
+                return None
+
+            def wait(self):
+                return 0
+        stub = types.SimpleNamespace(
+            latest={"claude": Usage("claude", "Claude", login_cmd=["claude.exe", "auth", "login", "--claudeai"])},
+            _login=None, popup=types.SimpleNamespace(render_if_visible=lambda: None),
+            post=lambda *m: posted.append(m), refresh=lambda: posted.append(("refreshed",)))
+        stub.logging_in = lambda pid: App.logging_in(stub, pid)
+        with mock.patch("agent_usage.app.subprocess.Popen", lambda cmd, **kw: started.append(cmd) or Proc()), \
+                mock.patch("agent_usage.app.threading.Thread",
+                           lambda target, daemon: types.SimpleNamespace(start=target)):
+            App.start_login(stub, "claude")
+            App.start_login(stub, "claude")          # 두 번 눌러도 창은 하나 (첫 창이 아직 처리 전)
+        self.assertEqual(started, [["claude.exe", "auth", "login", "--claudeai"]])
+        self.assertEqual(posted, [("login_done", "claude")])
+        App._handle(stub, "login_done", "claude")
+        self.assertIsNone(stub._login)
+        self.assertEqual(posted[-1], ("refreshed",))
+
+    def test_codex_credit_expiry_uses_available_unexpired_credits(self):
+        from datetime import datetime, timezone
+        now = time.time()
+        iso = lambda n: datetime.fromtimestamp(now + n * 86400, timezone.utc).isoformat()
+        d = {"credits": [{"status": "available", "expires_at": iso(12)},
+                         {"status": "available", "expires_at": iso(30)},
+                         {"status": "redeemed", "expires_at": iso(2)},          # 이미 쓴 것과
+                         {"status": "available", "expires_at": iso(-1)}]}       # 이미 소멸한 것은 빼고
+        self.assertEqual(round(codex.credit_expiry(d, now)), round(now + 12 * 86400))
+        self.assertIsNone(codex.credit_expiry({"credits": []}, now))
+
     def test_cursor_on_demand_only_is_not_an_error(self):
         def on_demand_only(opts):
             u = Usage("cursor", "Cursor")

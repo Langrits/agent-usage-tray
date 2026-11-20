@@ -23,12 +23,12 @@
 
 | 서비스 | 보여주는 것 | 사용하는 로그인 |
 |---|---|---|
-| Claude (Pro / Max) | 5시간·주간·모델별 주간 한도 | Claude Code CLI (`~/.claude/.credentials.json`) |
+| Claude (Pro / Max) | 5시간·주간·모델별 주간 한도, 재설정권 | Claude Code CLI (`~/.claude/.credentials.json`) |
 | Codex (ChatGPT 요금제) | 5시간·주간 한도, 재설정권, 크레딧 잔액 | Codex 앱 또는 CLI (`~/.codex/auth.json`). 안 되면 Codex 작업 기록을 읽어요 |
 | Cursor | 이번 결제 주기(Auto / API 비율), 추가 사용 금액 | Cursor 앱 (`state.vscdb`) |
 | Gemini (실험적) | 모델별 하루 요청 한도 | Google 계정으로 로그인한 Gemini CLI (`~/.gemini/oauth_creds.json`) |
 
-Claude 재설정권은 이 프로그램이 쓰는 주소에서 제공하지 않아 표시하지 않아요(2026년 10월 기준).
+Claude는 재설정권을 Claude Code에게만 사용량과 함께 알려 줘요. 그래서 이 프로그램은 Claude 사용량을 조회할 때 이 PC에 설치된 Claude Code 버전으로 Claude Code와 같은 방식으로 요청해요. Claude Code를 찾지 못하면 알려진 최근 버전을 써요.
 
 ## 설치
 
@@ -49,7 +49,7 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 
 이 프로그램은 PC에 이미 있는 로그인만 읽어요. 쓰는 도구마다 한 번씩 로그인해 두세요.
 
-- **Claude**: [Claude Code](https://code.claude.com/docs)를 설치하세요(PowerShell에서 `irm https://claude.ai/install.ps1 | iex`). 그다음 `claude`를 실행하고 **Claude account with subscription**을 골라 로그인하세요. Claude 데스크톱 앱의 로그인은 쓸 수 없어요. 암호화돼 있고, claude.ai가 브라우저가 아닌 접속을 막기 때문이에요.
+- **Claude**: [Claude Code](https://code.claude.com/docs)를 설치하세요(PowerShell에서 `irm https://claude.ai/install.ps1 | iex`). 그다음 `claude`를 실행하고 **Claude account with subscription**을 골라 로그인하세요. Claude 데스크톱 앱의 로그인은 쓸 수 없어요. 암호화돼 있고, claude.ai가 브라우저가 아닌 접속을 막기 때문이에요. 로그인은 8시간마다 자동으로 갱신되지만 약 4주가 지나면 다시 로그인해야 해요. 그때는 Claude 카드의 **다시 로그인** 버튼을 누르고 브라우저에서 승인하면 돼요(Claude Code의 `claude auth login --claudeai`를 대신 실행해요).
 - **Codex**: Codex 앱이나 CLI에 ChatGPT 계정으로 로그인하세요.
 - **Cursor**: Cursor 앱에 로그인하세요.
 - **Gemini (실험적)**: [Gemini CLI](https://github.com/google-gemini/gemini-cli)를 설치하고 `gemini`를 실행해 Google 계정으로 로그인하세요.

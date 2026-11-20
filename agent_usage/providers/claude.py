@@ -4,18 +4,21 @@ Claude Code CLI 로그인(~/.claude/.credentials.json)으로 Claude Code의 /usa
 claude.ai 웹 주소는 Cloudflare가 프로그램 접속을 막아서 쓰지 않는다.
 접속 토큰은 8시간 정도면 만료된다. 자동 갱신이 켜져 있으면 Claude Code와 같은 방식으로 갱신하고
 새 토큰을 같은 파일에 다시 써서 Claude Code CLI도 계속 쓸 수 있게 한다.
+재설정권(cedar_ember)은 ?cedar_ember=1을 붙이고 최신 Claude Code로 보이는 요청에만 응답에 들어 있어서,
+이 조회는 설치된 Claude Code 버전으로 Claude Code와 같은 사용자 에이전트를 보낸다.
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 
 import requests
 
 from ..i18n import t
 from ..models import ResetCredits, Usage, Window
-from ._util import USER_AGENT, HOME, LoginProblem, Options, epoch, read_json, write_json_atomic
+from ._util import HOME, LoginProblem, Options, as_number, epoch, read_json, write_json_atomic
 
 log = logging.getLogger("agent_usage")
 
@@ -25,11 +28,30 @@ EXPERIMENTAL = False
 
 CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
 CRED_PATH = os.path.join(CLAUDE_DIR, ".credentials.json")
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"   # Claude Code CLI (공개 클라이언트)
+CLI_VERSION_FALLBACK = "2.1.326"   # 설치된 Claude Code를 못 찾을 때 (너무 오래된 버전이면 재설정권을 주지 않는다)
+_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 ORDER = ["five_hour", "seven_day"]
+
+
+def _cli_version() -> str:
+    """설치된 Claude Code 중 가장 새 버전 (기본 설치 폴더와 npm 설치를 본다)."""
+    found = []
+    try:
+        found += os.listdir(os.path.join(HOME, ".local", "share", "claude", "versions"))
+    except OSError:
+        pass
+    pkg = os.path.join(os.environ.get("APPDATA", ""), "npm", "node_modules", "@anthropic-ai", "claude-code",
+                       "package.json")
+    try:
+        found.append(str(read_json(pkg).get("version") or ""))
+    except (OSError, ValueError, AttributeError):
+        pass
+    versions = [v for v in found if _VERSION.fullmatch(v)]
+    return max(versions, key=lambda v: tuple(map(int, v.split(".")))) if versions else CLI_VERSION_FALLBACK
 
 
 def detect() -> bool:
@@ -99,6 +121,8 @@ def fetch(opts: Options) -> Usage:
     try:
         token, oauth = _access_token(opts)
     except LoginProblem as p:
+        if p.hint in (t("hint_claude_login"), t("hint_claude_run")):
+            return _needs_login(usage, p.error, p.hint)
         return usage.fail(p.error, p.hint)
 
     usage.plan = _plan(oauth)
@@ -106,15 +130,52 @@ def fetch(opts: Options) -> Usage:
         "Authorization": f"Bearer {token}",
         "anthropic-beta": "oauth-2025-04-20",
         "Content-Type": "application/json",
-        "User-Agent": USER_AGENT,
+        "User-Agent": f"claude-cli/{_cli_version()} (external, cli)",    # 재설정권을 받으려면 Claude Code로 보여야 한다
     })
     if resp.status_code == 401:
-        return usage.fail(t("err_expired", title="Claude"), t("hint_claude_login"))
+        return _needs_login(usage, t("err_expired", title="Claude"))
     if resp.status_code == 429:
         return usage.fail(t("err_rate_limited"), t("hint_rate_limited"))
     resp.raise_for_status()
     parse(usage, resp.json())
     return usage
+
+
+def _needs_login(usage: Usage, error: str, hint: str | None = None) -> Usage:
+    """다시 로그인해야 할 때: Claude Code가 있으면 카드의 '다시 로그인' 버튼이 그 로그인 명령을 실행한다.
+    (자동 갱신을 꺼 둔 경우에도 버튼으로 직접 로그인할 수 있다.) Claude Code가 없으면 원래 안내만 보인다."""
+    usage.fail(error, hint or t("hint_claude_login"))
+    usage.login_cmd = _login_cmd()
+    if usage.login_cmd:
+        usage.hint = t("hint_claude_relogin")
+    return usage
+
+
+def _login_cmd() -> list[str] | None:
+    """Claude Code의 구독 로그인 명령 (로그인 방법을 고르지 않고 브라우저 승인 화면으로 바로 간다)."""
+    for exe in _claude_candidates():
+        if _absolute(exe) and os.path.isfile(exe):
+            return [exe, "auth", "login", "--claudeai"]
+    return None
+
+
+def _claude_candidates():
+    """PATH의 절대 경로 폴더, 기본 설치 위치, npm 설치 위치 순서. 현재 폴더는 보지 않는다
+    (shutil.which는 Windows에서 현재 폴더를 먼저 찾을 수 있어 쓰지 않는다)."""
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if _absolute(d):
+            for name in ("claude.exe", "claude.cmd"):
+                yield os.path.join(d, name)
+    yield os.path.join(HOME, ".local", "bin", "claude.exe")
+    if os.environ.get("APPDATA"):
+        yield os.path.join(os.environ["APPDATA"], "npm", "claude.cmd")
+
+
+def _absolute(path: str) -> bool:
+    """드라이브나 네트워크 위치까지 있는 완전한 경로만 (Windows에서 드라이브 없이 시작하는 경로는 제외)."""
+    if not path or not os.path.isabs(path):
+        return False
+    return os.name != "nt" or bool(os.path.splitdrive(path)[0])
 
 
 def parse(usage: Usage, d: dict) -> None:
@@ -135,9 +196,7 @@ def parse(usage: Usage, d: dict) -> None:
         usage.extra.append(t("week_breakdown",
                              rows=" · ".join(f"{r['display_name']} {r['percent']:.0f}%" for r in rows)))
 
-    rc = _find_reset_credits(d)
-    if rc:
-        usage.reset_credits = rc
+    usage.reset_credits = _reset_credits(d.get("cedar_ember"))
 
 
 def _parse_limits(usage: Usage, limits: list) -> None:
@@ -180,20 +239,16 @@ def _parse_legacy(usage: Usage, d: dict) -> None:
     usage.windows.sort(key=lambda w: ORDER.index(w.key) if w.key in ORDER else len(ORDER))
 
 
-def _find_reset_credits(d: dict) -> ResetCredits | None:
-    """재설정권. 2026-10 기준 이 주소의 응답에는 없다. 생기면 잡히도록 이름에 reset이 들어간 개수 항목을 찾는다."""
-    for key, val in d.items():
-        k = key.lower()
-        if "reset" not in k or k.endswith("resets_at"):
-            continue
-        if isinstance(val, dict):
-            count = val.get("available_count", val.get("count", val.get("available")))
-            if isinstance(count, (int, float)) and not isinstance(count, bool):
-                exp = next((epoch(v) for kk, v in val.items() if "expire" in kk.lower() and v), None)
-                return ResetCredits(int(count), exp)
-        if isinstance(val, list):
-            exps = [e for e in (epoch(x.get("expires_at")) for x in val if isinstance(x, dict)) if e]
-            return ResetCredits(len(val), min(exps) if exps else None)
-        if isinstance(val, int) and not isinstance(val, bool):
-            return ResetCredits(val)
-    return None
+def _reset_credits(ce) -> ResetCredits | None:
+    """재설정권(cedar_ember): 받은 재설정권들의 남은 횟수 합과 가장 먼저 끝나는 날.
+
+    서버가 이 계정·요청을 대상으로 보지 않으면(eligible이 아님) 줄 자체를 보여 주지 않는다.
+    """
+    if not isinstance(ce, dict) or ce.get("eligible") is not True:
+        return None
+    left = [(as_number(g.get("resets_left")), epoch(g.get("ends_at")))
+            for g in ce.get("grants") or [] if isinstance(g, dict)]
+    now = time.time()
+    left = [(n, end) for n, end in left if n and n > 0 and (end is None or end > now)]   # 이미 끝난 것은 빼고
+    ends = [end for _, end in left if end]
+    return ResetCredits(int(sum(n for n, _ in left)), min(ends) if ends else None)

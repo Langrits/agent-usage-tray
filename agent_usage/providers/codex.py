@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
+import time
 
 import requests
 
 from ..i18n import t
 from ..models import ResetCredits, Usage, Window, window_key, window_label
 from ._util import HOME, Options, as_number, epoch, read_json
+
+log = logging.getLogger("agent_usage")
 
 ID = "codex"
 TITLE = "Codex"
@@ -23,6 +27,8 @@ EXPERIMENTAL = False
 CODEX_DIR = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
 AUTH_PATH = os.path.join(CODEX_DIR, "auth.json")
 USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+# 재설정권 하나하나의 소멸 시각. 읽기만 한다 (뒤에 /consume이 붙은 주소는 재설정권을 쓰는 것이라 부르지 않는다)
+RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
 PLAN_NAMES = {"plus": "Plus", "pro": "Pro", "prolite": "Pro Lite", "team": "Team",
               "business": "Business", "enterprise": "Enterprise", "free": "Free", "go": "Go"}
@@ -48,16 +54,24 @@ def fetch(opts: Options) -> Usage:
 
 def _from_api() -> Usage:
     tokens = read_json(AUTH_PATH)["tokens"]
-    resp = requests.get(USAGE_URL, timeout=15, headers={
+    headers = {
         "Authorization": f"Bearer {tokens['access_token']}",
         "ChatGPT-Account-Id": tokens["account_id"],
         "User-Agent": "codex_cli_rs",
-    })
+    }
+    resp = requests.get(USAGE_URL, timeout=15, headers=headers)
     if resp.status_code == 401:
         raise RuntimeError(t("err_expired", title="Codex"))
     resp.raise_for_status()
     usage = Usage(ID, TITLE, source=t("source_api"))
     parse(usage, resp.json())
+    if usage.reset_credits and usage.reset_credits.count:
+        try:                    # 소멸 시각을 못 읽어도 개수는 그대로 보여 준다
+            r = requests.get(RESET_CREDITS_URL, timeout=15, headers=headers)
+            r.raise_for_status()
+            usage.reset_credits.expires_at = credit_expiry(r.json(), time.time())
+        except (requests.RequestException, ValueError) as e:
+            log.info("codex: reset credit details unavailable: %s", type(e).__name__)
     return usage
 
 
@@ -73,8 +87,8 @@ def parse(usage: Usage, d: dict) -> None:
         _add_extra_limit(usage, extra)
 
     rc = d.get("rate_limit_reset_credits")
-    if isinstance(rc, dict):
-        usage.reset_credits = ResetCredits(int(rc.get("available_count") or 0), _earliest_expiry(rc))
+    if isinstance(rc, dict):        # 개수만 온다. 소멸 시각은 RESET_CREDITS_URL에서 따로 읽는다
+        usage.reset_credits = ResetCredits(int(as_number(rc.get("available_count")) or 0))
     credits = d.get("credits") or {}
     if credits.get("unlimited"):
         usage.extra.append(t("credits_unlimited"))
@@ -96,23 +110,15 @@ def _add_extra_limit(usage: Usage, extra: dict) -> None:
                                         used, w.get("reset_at")))
 
 
-def _earliest_expiry(rc: dict) -> float | None:
-    """재설정권 소멸 시각. 개수가 0일 땐 응답에 없어서 실제 모양을 아직 모른다 → 보이는 대로 찾는다."""
-    found = []
-
-    def walk(o):
-        if isinstance(o, dict):
-            for k, v in o.items():
-                if "expire" in k.lower() and v:
-                    ts = epoch(v)
-                    if ts:
-                        found.append(ts)
-                walk(v)
-        elif isinstance(o, list):
-            for v in o:
-                walk(v)
-    walk(rc)
-    return min(found) if found else None
+def credit_expiry(d, now: float) -> float | None:
+    """재설정권 상세 응답에서 쓸 수 있는(available) 것 중 가장 먼저 소멸하는 시각. 모양이 다르면 None."""
+    credits = d.get("credits") if isinstance(d, dict) else None
+    if not isinstance(credits, list):
+        return None
+    ends = [epoch(c.get("expires_at")) for c in credits
+            if isinstance(c, dict) and c.get("status") == "available"]
+    ends = [e for e in ends if e and e > now]
+    return min(ends) if ends else None
 
 
 def _from_logs() -> Usage:
