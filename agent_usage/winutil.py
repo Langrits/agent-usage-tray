@@ -90,6 +90,8 @@ def already_running() -> bool:
 
 
 def _autostart_command() -> str:
+    if getattr(sys, "frozen", False):              # exe로 받아 쓰는 경우: exe 자신을 등록한다
+        return f'"{sys.executable}"'
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     return f'"{pythonw}" "{os.path.join(PROJECT_DIR, "run.pyw")}"'
 

@@ -562,6 +562,15 @@ class WindowsTest(unittest.TestCase):
         self.assertLess(left, right)
         self.assertLess(top, bottom)
 
+    def test_autostart_runs_the_exe_when_frozen(self):
+        exe = r"C:\Apps\AI Usage Tray\AI Usage Tray.exe"
+        with mock.patch.object(winutil.sys, "frozen", True, create=True), \
+                mock.patch.object(winutil.sys, "executable", exe):
+            self.assertEqual(winutil._autostart_command(), f'"{exe}"')
+        cmd = winutil._autostart_command()                       # 소스로 실행: pythonw + run.pyw
+        self.assertIn("pythonw.exe", cmd)
+        self.assertTrue(cmd.endswith('run.pyw"'))
+
 
 class StringsTest(unittest.TestCase):
     def test_korean_and_english_have_same_keys(self):

@@ -32,6 +32,16 @@ Claude는 재설정권을 Claude Code에게만 사용량과 함께 알려 줘요
 
 ## 설치
 
+### 실행 파일로 설치 (Python 필요 없음)
+
+1. [최신 릴리스](https://github.com/Langrits/agent-usage-tray/releases/latest)에서 `AI-Usage-Tray-<버전>-windows-x64.zip`을 받아요.
+2. 압축을 원하는 곳(예: `문서` 폴더)에 풀고, `AI Usage Tray` 폴더 안의 **AI Usage Tray.exe**를 실행해요.
+3. 처음 실행할 때 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누르세요. 코드 서명을 하지 않은 프로그램이라 뜨는 경고예요. 압축을 풀기 전에 zip 파일 → 속성 → **차단 해제**를 체크하면 이 경고가 뜨지 않아요.
+
+폴더를 다른 곳으로 옮겼다면 설정에서 **윈도우 시작 시 자동 실행**을 한 번 껐다 켜 주세요(실행 파일 위치가 바뀌어서예요).
+
+### Python으로 설치 (소스에서 실행)
+
 준비물: **Windows 10/11**, [python.org](https://www.python.org/downloads/)의 **Python 3.10 이상**(tkinter 포함)
 
 ```powershell
@@ -105,7 +115,8 @@ git이 없으면 GitHub에서 ZIP으로 내려받아 압축을 풀고, `install.
 
 ## 업데이트 / 삭제
 
-- 업데이트: `git pull` 후 `install.cmd`를 다시 실행하세요.
+- 업데이트 (실행 파일): 트레이 메뉴에서 종료한 뒤, 새 버전 zip의 `AI Usage Tray` 폴더로 기존 폴더를 덮어쓰세요. 설정과 기록은 `%USERPROFILE%\.ai-usage-tray`에 있어서 그대로 남아요.
+- 업데이트 (Python): `git pull` 후 `install.cmd`를 다시 실행하세요.
 - 삭제: 설정에서 **윈도우 시작 시 자동 실행**을 끄고, 트레이 메뉴에서 종료하세요. 그다음 프로그램 폴더와 `%USERPROFILE%\.ai-usage-tray`를 지우면 돼요. 예전 버전이 남긴 `%LOCALAPPDATA%\AgentUsage`가 있으면 그것도 지우세요.
 
 ## 문제 해결
