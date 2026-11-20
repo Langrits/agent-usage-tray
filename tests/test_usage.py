@@ -303,6 +303,17 @@ class ParseTest(unittest.TestCase):
             os.chdir(old)
         self.assertEqual(cmd[0], os.path.join(good, "claude.exe"))
 
+    def test_claude_lookup_skips_drive_relative_paths_and_npm_without_appdata(self):
+        drive_relative = os.sep + "bin"                       # 드라이브 없는 경로 (현재 드라이브 기준)
+        home = tempfile.mkdtemp()
+        env = {k: v for k, v in os.environ.items() if k != "APPDATA"}
+        env["PATH"] = os.pathsep.join([drive_relative, "relative"])
+        with mock.patch.object(claude, "HOME", home), mock.patch.dict(os.environ, env, clear=True):
+            found = list(claude._claude_candidates())
+        self.assertEqual(found, [os.path.join(home, ".local", "bin", "claude.exe")])
+        self.assertFalse(claude._absolute(drive_relative))
+        self.assertTrue(claude._absolute(os.path.join(home, "x")))
+
     def test_claude_button_also_when_auto_renewal_is_off(self):
         def expired(opts):
             raise claude.LoginProblem(i18n.t("err_expired", title="Claude"), i18n.t("hint_claude_run"))

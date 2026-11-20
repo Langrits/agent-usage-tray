@@ -154,7 +154,7 @@ def _needs_login(usage: Usage, error: str, hint: str | None = None) -> Usage:
 def _login_cmd() -> list[str] | None:
     """Claude Code의 구독 로그인 명령 (로그인 방법을 고르지 않고 브라우저 승인 화면으로 바로 간다)."""
     for exe in _claude_candidates():
-        if os.path.isabs(exe) and os.path.isfile(exe):
+        if _absolute(exe) and os.path.isfile(exe):
             return [exe, "auth", "login", "--claudeai"]
     return None
 
@@ -163,12 +163,19 @@ def _claude_candidates():
     """PATH의 절대 경로 폴더, 기본 설치 위치, npm 설치 위치 순서. 현재 폴더는 보지 않는다
     (shutil.which는 Windows에서 현재 폴더를 먼저 찾을 수 있어 쓰지 않는다)."""
     for d in os.environ.get("PATH", "").split(os.pathsep):
-        if d and os.path.isabs(d):
+        if _absolute(d):
             for name in ("claude.exe", "claude.cmd"):
                 yield os.path.join(d, name)
     yield os.path.join(HOME, ".local", "bin", "claude.exe")
     if os.environ.get("APPDATA"):
         yield os.path.join(os.environ["APPDATA"], "npm", "claude.cmd")
+
+
+def _absolute(path: str) -> bool:
+    """드라이브나 네트워크 위치까지 있는 완전한 경로만 (Windows에서 드라이브 없이 시작하는 경로는 제외)."""
+    if not path or not os.path.isabs(path):
+        return False
+    return os.name != "nt" or bool(os.path.splitdrive(path)[0])
 
 
 def parse(usage: Usage, d: dict) -> None:
