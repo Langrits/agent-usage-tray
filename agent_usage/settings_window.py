@@ -19,6 +19,7 @@ from .providers import ALL
 from .store import DATA_DIR
 
 MODES = ("auto", "show", "hide")
+THEMES = ("auto", "light", "dark")
 LANGS = (("auto", None), ("ko", "한국어"), ("en", "English"))     # None: 화면 언어로 '자동'
 THRESHOLDS = (5, 10, 15, 20, 25, 30, 40, 50)                     # 부족 알림 기준(남은 양 %) 단계
 REFRESH_MINUTES = (2, 3, 5, 10, 15, 20, 30, 60)
@@ -321,6 +322,10 @@ class SettingsWindow:
         Switch(row, c, app.scale, winutil.autostart_enabled(), winutil.set_autostart).pack(side="right")
         self._labels(row, t("s_autostart"))
         row = self._row(card, 3)
+        Segmented(row, c, px, [(k, t(f"s_theme_{k}")) for k in THEMES], s["theme"] or "auto",
+                  lambda v: app.set_setting("theme", v)).pack(side="right")
+        self._labels(row, t("s_theme"))
+        row = self._row(card, 4)
         langs = [(k, name or t("s_lang_auto")) for k, name in LANGS]
         Segmented(row, c, px, langs, s["language"] or "auto", self._set_language).pack(side="right")
         self._labels(row, t("s_language"))
@@ -366,6 +371,14 @@ class SettingsWindow:
     def _on_wheel(self, e) -> None:
         if self.scrolling:
             self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units")
+
+    def restyle(self) -> None:
+        """테마가 바뀌면 새 색으로 다시 그린다 (누른 버튼이 든 화면을 그 처리 도중에 지우지 않게 다음 차례에)."""
+        self.dark = self.app.pal is theme.DARK
+        self.c = {**self.app.pal, **EXTRA["dark" if self.dark else "light"]}
+        self.win.configure(bg=self.c["win"])
+        winutil.dark_title_bar(self.win, self.dark)
+        self.win.after_idle(self.build)
 
     def refresh_status(self) -> None:
         for mod in ALL:

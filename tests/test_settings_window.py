@@ -55,5 +55,19 @@ class SwitchImageTest(unittest.TestCase):
         self.assertEqual(switch_image(False, True, colors, 1.5).size, (66, 42))
 
 
+class ThemeChoiceTest(unittest.TestCase):
+    def test_theme_setting_picks_the_palette(self):
+        from unittest import mock
+
+        from agent_usage import theme
+        self.assertIs(theme.palette("light"), theme.LIGHT)
+        self.assertIs(theme.palette("dark"), theme.DARK)
+        with mock.patch.object(theme, "is_light", lambda: True):
+            self.assertIs(theme.palette("auto"), theme.LIGHT)          # 자동: Windows 앱 모드를 따른다
+        with mock.patch.object(theme, "is_light", lambda: False):
+            self.assertIs(theme.palette("auto"), theme.DARK)
+            self.assertIs(theme.palette(), theme.DARK)
+
+
 if __name__ == "__main__":
     unittest.main()

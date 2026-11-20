@@ -77,7 +77,7 @@ class App:
         self.root.withdraw()
         self.root.report_callback_exception = lambda *exc: log.error("tk callback", exc_info=exc)
         self.scale = self.root.winfo_fpixels("1i") / 96
-        self.pal = theme.palette()
+        self.pal = theme.palette(self.settings["theme"])
         self.popup = Popup(self)
         self.settings_win: SettingsWindow | None = None
         self.icon = pystray.Icon("AgentUsage", tray_image("…", theme.STATUS["none"]), APP_NAME,
@@ -106,6 +106,8 @@ class App:
             self.popup.render_if_visible()
             self._update_tray()
             self.refresh()
+        elif key == "theme":
+            self.apply_theme()
         elif key == "language":
             i18n.set_language(value)
             self.icon.update_menu()
@@ -334,6 +336,16 @@ class App:
             self.post("login_done", pid)
         threading.Thread(target=wait, daemon=True).start()
 
+    def apply_theme(self) -> None:
+        """테마를 바꾸면 열린 창을 새 색으로 다시 만든다 (창의 색은 만들 때 정해진다)."""
+        pal = theme.palette(self.settings["theme"])
+        if pal is self.pal:
+            return
+        self.pal = pal
+        self.popup.recreate()
+        if self.settings_win and self.settings_win.alive():
+            self.settings_win.restyle()
+
     def open_settings(self) -> None:
         if self.settings_win and self.settings_win.alive():
             self.settings_win.focus()
@@ -367,6 +379,7 @@ class Popup:
         self._geom = None
         self._drag = (0, 0)
         self._scrolling = False
+        self._wheel_bound = False
         self.history = HistoryPanel(self)      # 팝업 옆에 붙는 사용 기록 패널
         self.activity = ActivityPanel(self)    # 그 바깥쪽에 붙는 작업 현황 패널
 
@@ -439,6 +452,18 @@ class Popup:
         if was_open[1]:
             self.activity.show()
 
+    def recreate(self) -> None:
+        """테마가 바뀌면 팝업과 옆 패널을 새 색으로 다시 만든다. 보이던 팝업은 그 자리에 다시 보인다."""
+        was_visible = self.visible
+        for w in (self.win, self.history.win, self.activity.win):
+            if w:
+                w.destroy()
+        self.win, self.body, self.refs, self._sig, self._geom = None, None, {}, None, None
+        self.visible, self._scrolling = False, False
+        self.history, self.activity = HistoryPanel(self), ActivityPanel(self)
+        if was_visible:
+            self.show()                        # 켜 둔 패널도 함께 다시 보인다
+
     def update_activity_count(self) -> None:
         """머리글 작업 현황 버튼 옆 숫자: 진행 중인 작업 수 (답을 기다리는 게 있으면 노란색)."""
         label = self.refs.get("activity_count")
@@ -468,7 +493,9 @@ class Popup:
         self.canvas.pack(side="left", fill="both", expand=True)
         self.frame = tk.Frame(self.canvas, bg=pal["bg"])
         self._frame_id = self.canvas.create_window(0, 0, window=self.frame, anchor="nw")
-        self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
+        if not self._wheel_bound:              # 테마를 바꿔 창을 다시 만들어도 한 번만 건다
+            self.win.bind_all("<MouseWheel>", self._on_wheel, add="+")
+            self._wheel_bound = True
 
     def show(self) -> None:
         if not self.win:

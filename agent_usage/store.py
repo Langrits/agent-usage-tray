@@ -123,6 +123,7 @@ DEFAULTS = {
     "notify_reset": True,
     "auto_refresh_login": True, # 만료된 Claude·Gemini CLI 로그인을 갱신해 다시 저장
     "language": "auto",         # "auto" | "ko" | "en"
+    "theme": "auto",            # "auto"(Windows 앱 모드) | "light" | "dark"
     "pinned": False,
     "pin_pos": None,            # [x, y]
     "history_range_hours": 24,  # 사용 기록 패널 기간

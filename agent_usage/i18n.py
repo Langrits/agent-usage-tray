@@ -86,6 +86,7 @@ KO = {
     "s_auto_refresh_help": "Claude·Gemini 로그인이 만료되면 갱신해서 CLI 파일에 다시 저장해요",
     "s_autostart": "윈도우 시작 시 자동 실행",
     "s_language": "언어", "s_lang_auto": "자동",
+    "s_theme": "테마", "s_theme_auto": "자동", "s_theme_light": "밝게", "s_theme_dark": "어둡게",
     "s_data": "데이터 폴더 열기",
 }
 
@@ -163,6 +164,7 @@ EN = {
     "s_auto_refresh_help": "When a Claude or Gemini login expires, renew it and save it back to that CLI's file",
     "s_autostart": "Start with Windows",
     "s_language": "Language", "s_lang_auto": "Auto",
+    "s_theme": "Theme", "s_theme_auto": "Auto", "s_theme_light": "Light", "s_theme_dark": "Dark",
     "s_data": "Open data folder",
 }
 
